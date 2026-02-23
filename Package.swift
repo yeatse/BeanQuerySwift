@@ -5,6 +5,7 @@ import PackageDescription
 
 let package = Package(
     name: "BeanQuerySwift",
+    platforms: [.iOS(.v17), .macOS(.v13), .watchOS(.v10), .visionOS(.v1), .tvOS(.v17)],
     products: [
         // Products define the executables and libraries a package produces, making them visible to other packages.
         .library(
@@ -13,6 +14,7 @@ let package = Package(
         ),
     ],
     dependencies: [
+        .package(url: "https://github.com/yeatse/BeancountSwift", from: "1.1.0"),
         .package(url: "https://github.com/antlr/antlr4", from: "4.13.2"),
     ],
     targets: [
@@ -22,6 +24,7 @@ let package = Package(
             name: "BeanQuerySwift",
             dependencies: [
                 .product(name: "Antlr4", package: "antlr4"),
+                .product(name: "BeancountSwift", package: "BeancountSwift"),
             ],
             exclude: [
                 "Grammar",

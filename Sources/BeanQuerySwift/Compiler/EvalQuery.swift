@@ -1,0 +1,128 @@
+import Foundation
+
+public indirect enum BQLParameterValue: Equatable, Sendable {
+    case integer(Int)
+    case decimal(Decimal)
+    case date(Date)
+    case string(String)
+    case bool(Bool)
+    case null
+    case list([BQLParameterValue])
+}
+
+public enum BQLParameters: Equatable, Sendable {
+    case positional([BQLParameterValue])
+    case named([String: BQLParameterValue])
+}
+
+enum EvalOrdering: Equatable {
+    case ascending
+    case descending
+}
+
+struct EvalOrderSpec: Equatable {
+    var index: Int
+    var ordering: EvalOrdering
+}
+
+struct EvalTarget: Equatable {
+    var expression: BQLExpression
+    var name: String?
+    var isAggregate: Bool
+}
+
+struct EvalSource: Equatable {
+    var table: EvalTableReference
+    var qualifiers: EvalQualifiers?
+}
+
+indirect enum EvalTableReference: Equatable {
+    case named(String)
+    case hash(String?)
+    case subquery(EvalQuery)
+}
+
+struct EvalQualifiers: Equatable {
+    var open: Date?
+    var close: BQLCloseQualifier?
+    var clear: Bool
+}
+
+public struct EvalQuery: Equatable {
+    var source: EvalSource
+    var targets: [EvalTarget]
+    var filter: BQLExpression?
+    var groupIndexes: [Int]?
+    var havingIndex: Int?
+    var orderSpec: [EvalOrderSpec]?
+    var limit: Int?
+    var distinct: Bool
+
+    var visibleTargets: [EvalTarget] {
+        targets.filter { $0.name != nil }
+    }
+}
+
+enum BQLCompileError: Error, Equatable, CustomStringConvertible {
+    case unsupportedStatement(String)
+    case invalidGroupByIndex(Int)
+    case invalidOrderByIndex(Int)
+    case namedParametersRequired
+    case positionalParametersRequired
+    case queryParameterMissing([String])
+    case placeholderCountMismatch(expected: Int, actual: Int)
+    case mixedPlaceholderStyles
+    case mixedAggregatesAndNonAggregates
+    case aggregatesOfAggregates
+    case groupByContainsAggregate
+    case groupByReferencesAggregate
+    case havingMustBeAggregate
+    case aggregateWithoutGroupBy
+    case missingGroupByTargets([String])
+    case closeDateMustFollowOpenDate
+    case invalidFromClause
+
+    var description: String {
+        switch self {
+        case .unsupportedStatement(let statement):
+            return "unsupported statement: \(statement)"
+        case .invalidGroupByIndex(let index):
+            return "invalid GROUP BY index: \(index)"
+        case .invalidOrderByIndex(let index):
+            return "invalid ORDER BY index: \(index)"
+        case .namedParametersRequired:
+            return "query parameters should be a mapping when using named placeholders"
+        case .positionalParametersRequired:
+            return "query parameters should be a sequence when using positional placeholders"
+        case .queryParameterMissing(let names):
+            return "query parameter missing: \(names.joined(separator: ", "))"
+        case .placeholderCountMismatch(let expected, let actual):
+            return "the query has \(expected) placeholders but \(actual) parameters were passed"
+        case .mixedPlaceholderStyles:
+            return "positional and named parameters cannot be mixed"
+        case .mixedAggregatesAndNonAggregates:
+            return "mixed aggregates and non-aggregates are not allowed"
+        case .aggregatesOfAggregates:
+            return "aggregates of aggregates are not allowed"
+        case .groupByContainsAggregate:
+            return "GROUP BY expressions may not be aggregates"
+        case .groupByReferencesAggregate:
+            return "GROUP BY references an aggregate target"
+        case .havingMustBeAggregate:
+            return "HAVING clause must be aggregate"
+        case .aggregateWithoutGroupBy:
+            return "aggregate query without GROUP BY may only contain aggregates"
+        case .missingGroupByTargets(let names):
+            return "non-aggregate targets missing from GROUP BY: \(names.joined(separator: ", "))"
+        case .closeDateMustFollowOpenDate:
+            return "CLOSE date must follow OPEN date"
+        case .invalidFromClause:
+            return "invalid FROM clause"
+        }
+    }
+}
+
+struct BQLCompilerOptions: Equatable {
+    var defaultTableName: String = "postings"
+    var supportImplicitGroupBy: Bool = true
+}

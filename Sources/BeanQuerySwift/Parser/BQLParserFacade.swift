@@ -1,3 +1,4 @@
+import Foundation
 import Antlr4
 
 struct BQLSyntaxError: Error, Equatable, Sendable {
@@ -37,7 +38,12 @@ private final class CollectingErrorListener: BaseErrorListener {
 }
 
 enum BQLParserFacade {
+    private static let parseLock = NSLock()
+
     static func parse(_ input: String) throws -> BQLParser.BqlContext {
+        parseLock.lock()
+        defer { parseLock.unlock() }
+
         let inputStream = ANTLRInputStream(input)
         let lexer = BQLLexer(inputStream)
         lexer.setTokenFactory(CommonTokenFactory(true))

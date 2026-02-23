@@ -415,13 +415,22 @@ struct BQLAstBuilder {
 
     private static func buildDate(_ ctx: BQLParser.DateLiteralContext) throws -> Date {
         let text = try tokenText(ctx.getStart(), "missing date token")
+        let parts = text.split(separator: "-")
+        guard parts.count == 3,
+              let year = Int(parts[0]),
+              let month = Int(parts[1]),
+              let day = Int(parts[2])
+        else {
+            throw BQLASTBuildError("invalid date literal: \(text)")
+        }
 
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.timeZone = TimeZone(secondsFromGMT: 0)
-        formatter.dateFormat = "yyyy-MM-dd"
+        var components = DateComponents()
+        components.year = year
+        components.month = month
+        components.day = day
+        components.calendar = Calendar.current
 
-        guard let date = formatter.date(from: text) else {
+        guard let date = components.date else {
             throw BQLASTBuildError("invalid date literal: \(text)")
         }
 
