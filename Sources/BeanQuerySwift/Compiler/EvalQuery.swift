@@ -55,6 +55,7 @@ public struct EvalQuery: Equatable {
     var groupIndexes: [Int]?
     var havingIndex: Int?
     var orderSpec: [EvalOrderSpec]?
+    var pivotIndexes: [Int]?
     var limit: Int?
     var distinct: Bool
 
@@ -86,6 +87,11 @@ enum BQLCompileError: LocalizedError, Equatable {
     case missingGroupByTargets([String])
     case closeDateMustFollowOpenDate
     case invalidFromClause
+    case invalidPivotByIndex(Int)
+    case pivotByColumnNotInTargets(String)
+    case pivotByColumnsMustDiffer
+    case pivotBySecondMustBeGroupByColumn
+    case invalidPivotByClause
     
     var errorDescription: String? {
         switch self {
@@ -134,6 +140,16 @@ enum BQLCompileError: LocalizedError, Equatable {
             return "CLOSE date must follow OPEN date"
         case .invalidFromClause:
             return "invalid FROM clause"
+        case .invalidPivotByIndex(let index):
+            return "invalid PIVOT BY column index: \(index)"
+        case .pivotByColumnNotInTargets(let column):
+            return "PIVOT BY column '\(column)' is not in the targets list"
+        case .pivotByColumnsMustDiffer:
+            return "the two PIVOT BY columns cannot be the same column"
+        case .pivotBySecondMustBeGroupByColumn:
+            return "the second PIVOT BY column must be a GROUP BY column"
+        case .invalidPivotByClause:
+            return "invalid PIVOT BY clause"
         }
     }
 }

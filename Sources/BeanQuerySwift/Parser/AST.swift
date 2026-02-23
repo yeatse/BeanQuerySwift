@@ -8,6 +8,8 @@ struct BQLSourceRange: Equatable, Sendable {
 indirect enum BQLStatement: Equatable {
     case select(BQLSelectStatement)
     case balances(BQLBalancesStatement)
+    case journal(BQLJournalStatement)
+    case print(BQLPrintStatement)
 }
 
 struct BQLSelectStatement: Equatable {
@@ -17,6 +19,7 @@ struct BQLSelectStatement: Equatable {
     var `where`: BQLExpression?
     var groupBy: BQLGroupByClause?
     var orderBy: [BQLOrderByItem]?
+    var pivotBy: BQLPivotByClause?
     var limit: Int?
     var sourceRange: BQLSourceRange? = nil
 }
@@ -25,6 +28,18 @@ struct BQLBalancesStatement: Equatable {
     var summaryFunction: String?
     var from: BQLFromExpression?
     var `where`: BQLExpression?
+    var sourceRange: BQLSourceRange? = nil
+}
+
+struct BQLJournalStatement: Equatable {
+    var account: String?
+    var summaryFunction: String?
+    var from: BQLFromExpression?
+    var sourceRange: BQLSourceRange? = nil
+}
+
+struct BQLPrintStatement: Equatable {
+    var from: BQLFromExpression?
     var sourceRange: BQLSourceRange? = nil
 }
 
@@ -78,6 +93,16 @@ struct BQLOrderByItem: Equatable {
     var value: BQLOrderByValue
     var ordering: BQLOrdering
     var sourceRange: BQLSourceRange? = nil
+}
+
+struct BQLPivotByClause: Equatable {
+    var items: [BQLPivotByItem]
+    var sourceRange: BQLSourceRange? = nil
+}
+
+enum BQLPivotByItem: Equatable {
+    case index(Int)
+    case column(String)
 }
 
 enum BQLOrderByValue: Equatable {

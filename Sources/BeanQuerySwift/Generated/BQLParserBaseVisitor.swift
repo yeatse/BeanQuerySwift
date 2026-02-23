@@ -156,6 +156,20 @@ internal class BQLParserBaseVisitor<T>: AbstractParseTreeVisitor<T> {
 	 * <p>The default implementation returns the result of calling
 	 * {@link #visitChildren} on {@code ctx}.</p>
 	 */
+	internal func visitPivotByClause(_ ctx: BQLParser.PivotByClauseContext) -> T? { return visitChildren(ctx) }
+	/**
+	 * {@inheritDoc}
+	 *
+	 * <p>The default implementation returns the result of calling
+	 * {@link #visitChildren} on {@code ctx}.</p>
+	 */
+	internal func visitPivotByItem(_ ctx: BQLParser.PivotByItemContext) -> T? { return visitChildren(ctx) }
+	/**
+	 * {@inheritDoc}
+	 *
+	 * <p>The default implementation returns the result of calling
+	 * {@link #visitChildren} on {@code ctx}.</p>
+	 */
 	internal func visitBalancesStmt(_ ctx: BQLParser.BalancesStmtContext) -> T? { return visitChildren(ctx) }
 	/**
 	 * {@inheritDoc}
@@ -164,6 +178,34 @@ internal class BQLParserBaseVisitor<T>: AbstractParseTreeVisitor<T> {
 	 * {@link #visitChildren} on {@code ctx}.</p>
 	 */
 	internal func visitBalancesFromClause(_ ctx: BQLParser.BalancesFromClauseContext) -> T? { return visitChildren(ctx) }
+	/**
+	 * {@inheritDoc}
+	 *
+	 * <p>The default implementation returns the result of calling
+	 * {@link #visitChildren} on {@code ctx}.</p>
+	 */
+	internal func visitJournalStmt(_ ctx: BQLParser.JournalStmtContext) -> T? { return visitChildren(ctx) }
+	/**
+	 * {@inheritDoc}
+	 *
+	 * <p>The default implementation returns the result of calling
+	 * {@link #visitChildren} on {@code ctx}.</p>
+	 */
+	internal func visitJournalFromClause(_ ctx: BQLParser.JournalFromClauseContext) -> T? { return visitChildren(ctx) }
+	/**
+	 * {@inheritDoc}
+	 *
+	 * <p>The default implementation returns the result of calling
+	 * {@link #visitChildren} on {@code ctx}.</p>
+	 */
+	internal func visitPrintStmt(_ ctx: BQLParser.PrintStmtContext) -> T? { return visitChildren(ctx) }
+	/**
+	 * {@inheritDoc}
+	 *
+	 * <p>The default implementation returns the result of calling
+	 * {@link #visitChildren} on {@code ctx}.</p>
+	 */
+	internal func visitPrintFromClause(_ ctx: BQLParser.PrintFromClauseContext) -> T? { return visitChildren(ctx) }
 	/**
 	 * {@inheritDoc}
 	 *

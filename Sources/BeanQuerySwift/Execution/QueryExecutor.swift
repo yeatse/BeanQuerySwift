@@ -8,8 +8,7 @@ struct QueryExecutor {
         let visible = query.targets.enumerated().compactMap { index, target in
             target.name == nil ? nil : (index, target.name!)
         }
-
-        let columns = visible.map(\.1)
+        var columns = visible.map(\.1)
         var projectedRows = fullRows.map { row in
             visible.map { row[$0.0] }
         }
@@ -21,6 +20,26 @@ struct QueryExecutor {
 
         if let limit = query.limit {
             projectedRows = Array(projectedRows.prefix(limit))
+        }
+
+        if let pivotIndexes = query.pivotIndexes {
+            let visibleIndexes = Dictionary(uniqueKeysWithValues: visible.enumerated().map { offset, item in
+                (item.0, offset)
+            })
+            guard let first = visibleIndexes[pivotIndexes[0]],
+                  let second = visibleIndexes[pivotIndexes[1]]
+            else {
+                throw BQLExecutionError.invalidPivotByColumns
+            }
+
+            let pivoted = pivot(
+                rows: projectedRows,
+                columns: columns,
+                firstColumn: first,
+                secondColumn: second
+            )
+            columns = pivoted.columns
+            projectedRows = pivoted.rows
         }
 
         return QueryResult(columns: columns, rows: projectedRows)
@@ -148,6 +167,67 @@ struct QueryExecutor {
         }
     }
 
+    private func pivot(
+        rows: [[RuntimeValue]],
+        columns: [String],
+        firstColumn: Int,
+        secondColumn: Int
+    ) -> (columns: [String], rows: [[RuntimeValue]]) {
+        let pivotLabel = "\(columns[firstColumn])/\(columns[secondColumn])"
+        let otherColumns = (0..<columns.count).filter { index in
+            index != firstColumn && index != secondColumn
+        }
+        let nonPivotCount = otherColumns.count
+
+        let keys = Array(Set(rows.map { $0[secondColumn] })).sorted { left, right in
+            compare(left, right) == .orderedAscending
+        }
+
+        var outputColumns: [String] = [pivotLabel]
+        if nonPivotCount > 1 {
+            for key in keys {
+                let keyName = renderValue(key)
+                for index in otherColumns {
+                    outputColumns.append("\(keyName)/\(columns[index])")
+                }
+            }
+        } else {
+            outputColumns.append(contentsOf: keys.map(renderValue))
+        }
+
+        let grouped = Dictionary(grouping: rows, by: { $0[firstColumn] })
+        let sortedGroupKeys = grouped.keys.sorted { left, right in
+            compare(left, right) == .orderedAscending
+        }
+        let keyOffsets = Dictionary(uniqueKeysWithValues: keys.enumerated().map { ($1, $0) })
+
+        var outputRows: [[RuntimeValue]] = []
+        for groupKey in sortedGroupKeys {
+            var outputRow = Array(repeating: RuntimeValue.null, count: outputColumns.count)
+            outputRow[0] = groupKey
+
+            guard let groupRows = grouped[groupKey], nonPivotCount > 0 else {
+                outputRows.append(outputRow)
+                continue
+            }
+
+            for row in groupRows {
+                guard let keyOffset = keyOffsets[row[secondColumn]] else {
+                    continue
+                }
+
+                let start = keyOffset * nonPivotCount + 1
+                for (offset, index) in otherColumns.enumerated() {
+                    outputRow[start + offset] = row[index]
+                }
+            }
+
+            outputRows.append(outputRow)
+        }
+
+        return (outputColumns, outputRows)
+    }
+
     private func evaluateBoolean(_ expression: BQLExpression, row: QueryRow, group: [QueryRow]?) throws -> Bool {
         let value = try evaluateExpression(expression, row: row, group: group)
         return try asBool(value)
@@ -269,6 +349,20 @@ struct QueryExecutor {
         switch normalized {
         case "units":
             return values.first ?? .null
+        case "cost":
+            return values.first ?? .null
+        case "maxwidth":
+            guard values.count == 2 else {
+                throw BQLExecutionError.unsupportedFunction(name)
+            }
+
+            guard case .string(let text) = values[0], let width = asInt(values[1]) else {
+                if values[0] == .null {
+                    return .null
+                }
+                throw BQLExecutionError.invalidType
+            }
+            return .string(String(text.prefix(max(width, 0))))
         case "account_sortkey":
             return values.first ?? .null
         default:
@@ -532,6 +626,33 @@ struct QueryExecutor {
         }
         let range = NSRange(input.startIndex..<input.endIndex, in: input)
         return regex.firstMatch(in: input, range: range) != nil
+    }
+
+    private func renderValue(_ value: RuntimeValue) -> String {
+        switch value {
+        case .int(let number):
+            return String(number)
+        case .decimal(let number):
+            return NSDecimalNumber(decimal: number).stringValue
+        case .string(let text):
+            return text
+        case .bool(let value):
+            return value ? "true" : "false"
+        case .date(let date):
+            let calendar = Calendar.current
+            let components = calendar.dateComponents([.year, .month, .day], from: date)
+            guard let year = components.year,
+                  let month = components.month,
+                  let day = components.day
+            else {
+                return "date"
+            }
+            return String(format: "%04d-%02d-%02d", year, month, day)
+        case .list(let values):
+            return values.map(renderValue).joined(separator: ",")
+        case .null:
+            return "null"
+        }
     }
 }
 

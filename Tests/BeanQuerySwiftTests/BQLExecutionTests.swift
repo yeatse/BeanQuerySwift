@@ -6,6 +6,12 @@ import Testing
 struct BQLExecutionTests {
     private let engine = BeanQueryEngine()
 
+    private func date(_ year: Int, _ month: Int, _ day: Int) -> Date {
+        Calendar(identifier: .gregorian).date(
+            from: DateComponents(year: year, month: month, day: day)
+        )!
+    }
+
     private var context: QueryContext {
         QueryContext(tables: [
             "postings": [
@@ -13,27 +19,63 @@ struct BQLExecutionTests {
                     "account": .string("Assets:Cash"),
                     "number": .int(10),
                     "position": .int(10),
+                    "balance": .int(10),
                     "year": .int(2024),
+                    "date": .date(date(2024, 1, 1)),
+                    "flag": .string("*"),
+                    "payee": .string("Alice"),
+                    "narration": .string("Coffee"),
                 ],
                 [
                     "account": .string("Assets:Cash"),
                     "number": .int(5),
                     "position": .int(5),
+                    "balance": .int(15),
                     "year": .int(2024),
+                    "date": .date(date(2024, 1, 2)),
+                    "flag": .string("*"),
+                    "payee": .string("Bob"),
+                    "narration": .string("Lunch"),
                 ],
                 [
                     "account": .string("Assets:Bank"),
                     "number": .int(7),
                     "position": .int(7),
+                    "balance": .int(7),
                     "year": .int(2024),
+                    "date": .date(date(2024, 1, 3)),
+                    "flag": .string("!"),
+                    "payee": .string("Carol"),
+                    "narration": .string("Salary"),
                 ],
                 [
                     "account": .string("Assets:Bank"),
                     "number": .int(3),
                     "position": .int(3),
+                    "balance": .int(10),
                     "year": .int(2023),
+                    "date": .date(date(2023, 12, 31)),
+                    "flag": .string("!"),
+                    "payee": .string("Dave"),
+                    "narration": .string("Interest"),
                 ],
-            ]
+            ],
+            "entries": [
+                [
+                    "id": .int(0),
+                    "type": .string("transaction"),
+                    "year": .int(2024),
+                    "account": .string("Assets:Cash"),
+                    "narration": .string("Coffee"),
+                ],
+                [
+                    "id": .int(1),
+                    "type": .string("transaction"),
+                    "year": .int(2023),
+                    "account": .string("Assets:Bank"),
+                    "narration": .string("Interest"),
+                ],
+            ],
         ])
     }
 
@@ -115,10 +157,44 @@ struct BQLExecutionTests {
             in: context
         )
 
-        #expect(result.columns == ["account", "number", "position", "year"])
+        #expect(result.columns == ["account", "balance", "date", "flag", "narration", "number", "payee", "position", "year"])
         #expect(result.rows == [
-            [.string("Assets:Cash"), .int(10), .int(10), .int(2024)],
-            [.string("Assets:Cash"), .int(5), .int(5), .int(2024)],
+            [.string("Assets:Cash"), .int(10), .date(date(2024, 1, 1)), .string("*"), .string("Coffee"), .int(10), .string("Alice"), .int(10), .int(2024)],
+            [.string("Assets:Cash"), .int(15), .date(date(2024, 1, 2)), .string("*"), .string("Lunch"), .int(5), .string("Bob"), .int(5), .int(2024)],
+        ])
+    }
+
+    @Test func runJournalQuery() throws {
+        let result = try engine.run(
+            "JOURNAL 'Assets:Cash' AT cost",
+            in: context
+        )
+
+        #expect(result.columns == ["date", "flag", "maxwidth", "maxwidth", "account", "cost", "cost"])
+        #expect(result.rows.count == 2)
+        #expect(result.rows[0][4] == .string("Assets:Cash"))
+        #expect(result.rows[0][5] == .int(10))
+        #expect(result.rows[0][6] == .int(10))
+    }
+
+    @Test func runPrintQuery() throws {
+        let result = try engine.run("PRINT", in: context)
+
+        #expect(result.rows.count == 2)
+        #expect(result.columns.contains("type"))
+        #expect(result.columns.contains("year"))
+    }
+
+    @Test func runPivotByQuery() throws {
+        let result = try engine.run(
+            "SELECT account, year, sum(number) AS total FROM #postings GROUP BY account, year PIVOT BY 1, 2",
+            in: context
+        )
+
+        #expect(result.columns == ["account/year", "2023", "2024"])
+        #expect(result.rows == [
+            [.string("Assets:Bank"), .int(3), .int(7)],
+            [.string("Assets:Cash"), .null, .int(15)],
         ])
     }
 }

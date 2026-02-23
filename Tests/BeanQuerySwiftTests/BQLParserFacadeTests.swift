@@ -32,6 +32,8 @@ struct BQLParserFacadeTests {
         "SELECT account, sum(number) FROM #postings GROUP BY account",
         "SELECT account, sum(number) FROM #postings GROUP BY 1",
         "SELECT account, sum(number) FROM #postings GROUP BY account HAVING sum(number) > 0",
+        "SELECT account, year, sum(number) FROM #postings GROUP BY account, year PIVOT BY 1, 2",
+        "SELECT account, year, sum(number) FROM #postings GROUP BY account, year PIVOT BY account, year",
         "SELECT account, number FROM #postings ORDER BY number DESC",
         "SELECT account, number FROM #postings ORDER BY 2 ASC",
         "SELECT account, number FROM #postings LIMIT 10",
@@ -47,6 +49,12 @@ struct BQLParserFacadeTests {
         "BALANCES AT units",
         "BALANCES AT units FROM CLOSE",
         "BALANCES AT units FROM CLOSE ON 2024-12-31 WHERE year = 2024",
+        "JOURNAL",
+        "JOURNAL 'Assets:Cash'",
+        "JOURNAL AT cost",
+        "JOURNAL 'Assets:Cash' AT cost FROM CLOSE ON 2024-12-31",
+        "PRINT",
+        "PRINT FROM CLOSE ON 2024-12-31",
     ]
 
     @Test(arguments: validQueries)
@@ -63,6 +71,16 @@ struct BQLParserFacadeTests {
     @Test func parseBalancesStatement() throws {
         let tree = try BQLParserFacade.parse("BALANCES AT units FROM CLOSE ON 2024-12-31 WHERE account ~ 'Assets:.*'")
         #expect(tree.statement()?.balancesStmt() != nil)
+    }
+
+    @Test func parseJournalStatement() throws {
+        let tree = try BQLParserFacade.parse("JOURNAL 'Assets:Cash' AT cost FROM CLOSE ON 2024-12-31")
+        #expect(tree.statement()?.journalStmt() != nil)
+    }
+
+    @Test func parsePrintStatement() throws {
+        let tree = try BQLParserFacade.parse("PRINT FROM CLOSE ON 2024-12-31")
+        #expect(tree.statement()?.printStmt() != nil)
     }
 
     @Test func parsePositionalPlaceholder() throws {
@@ -151,6 +169,48 @@ struct BQLParserFacadeTests {
 
         #expect(balances.summaryFunction == "units")
         #expect(balances.from?.close != nil)
+    }
+
+    @Test func buildJournalAst() throws {
+        let statement = try BQLParserFacade.parseStatement(
+            "JOURNAL 'Assets:Cash' AT cost FROM CLOSE ON 2024-12-31"
+        )
+
+        guard case .journal(let journal) = statement else {
+            Issue.record("expected JOURNAL AST")
+            return
+        }
+
+        #expect(journal.account == "Assets:Cash")
+        #expect(journal.summaryFunction == "cost")
+        #expect(journal.from?.close != nil)
+    }
+
+    @Test func buildPrintAst() throws {
+        let statement = try BQLParserFacade.parseStatement(
+            "PRINT FROM CLOSE ON 2024-12-31"
+        )
+
+        guard case .print(let printStatement) = statement else {
+            Issue.record("expected PRINT AST")
+            return
+        }
+
+        #expect(printStatement.from?.close != nil)
+    }
+
+    @Test func buildPivotByAst() throws {
+        let statement = try BQLParserFacade.parseStatement(
+            "SELECT account, year, sum(number) FROM #postings GROUP BY account, year PIVOT BY account, year"
+        )
+
+        guard case .select(let select) = statement else {
+            Issue.record("expected SELECT AST")
+            return
+        }
+
+        #expect(select.pivotBy != nil)
+        #expect(select.pivotBy?.items.count == 2)
     }
 
     @Test func dumpAst() throws {

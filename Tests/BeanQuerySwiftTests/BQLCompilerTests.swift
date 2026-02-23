@@ -25,6 +25,8 @@ struct BQLCompilerTests {
         "SELECT account, sum(number) FROM #postings GROUP BY account",
         "SELECT account, sum(number) FROM #postings GROUP BY 1",
         "SELECT account, sum(number) FROM #postings GROUP BY account HAVING sum(number) > 0",
+        "SELECT account, year, sum(number) FROM #postings GROUP BY account, year PIVOT BY 1, 2",
+        "SELECT account, year, sum(number) FROM #postings GROUP BY account, year PIVOT BY account, year",
         "SELECT account, sum(number) AS total FROM #postings GROUP BY account ORDER BY total DESC",
         "SELECT account, number FROM #postings ORDER BY number DESC",
         "SELECT account, number FROM #postings ORDER BY 2 ASC",
@@ -44,6 +46,12 @@ struct BQLCompilerTests {
         "BALANCES AT units",
         "BALANCES AT units FROM CLOSE",
         "BALANCES AT units FROM CLOSE ON 2024-12-31 WHERE year = 2024",
+        "JOURNAL",
+        "JOURNAL 'Assets:Cash'",
+        "JOURNAL AT cost",
+        "JOURNAL 'Assets:Cash' AT cost FROM CLOSE ON 2024-12-31",
+        "PRINT",
+        "PRINT FROM CLOSE ON 2024-12-31",
     ]
 
     @Test(arguments: compileableQueries)
@@ -95,12 +103,88 @@ struct BQLCompilerTests {
         #expect(tableName == "postings")
     }
 
+    @Test func compileJournalDesugarsToSelectPlan() throws {
+        let compiled = try engine.run(
+            "JOURNAL 'Assets:Cash' AT cost FROM CLOSE ON 2024-12-31"
+        )
+
+        #expect(compiled.targets.count == 7)
+        #expect(compiled.targets[0].name == "date")
+        #expect(compiled.targets[4].name == "account")
+        #expect(compiled.source.qualifiers?.close != nil)
+        #expect(compiled.filter != nil)
+    }
+
+    @Test func compilePrintUsesEntriesAsDefaultTable() throws {
+        let compiled = try engine.run("PRINT FROM CLOSE ON 2024-12-31")
+
+        guard case .named(let tableName) = compiled.source.table else {
+            Issue.record("expected named table source")
+            return
+        }
+        #expect(tableName == "entries")
+        #expect(compiled.source.qualifiers?.close != nil)
+        #expect(compiled.groupIndexes == nil)
+        #expect(compiled.pivotIndexes == nil)
+    }
+
+    @Test func compilePivotByResolvesIndexes() throws {
+        let compiled = try engine.run(
+            "SELECT account, year, sum(number) AS total FROM #postings GROUP BY account, year PIVOT BY 1, 2"
+        )
+        #expect(compiled.pivotIndexes == [0, 1])
+    }
+
     @Test func compileInvalidGroupByIndexFails() throws {
         do {
             _ = try engine.run("SELECT account, sum(number) FROM #postings GROUP BY 3")
             Issue.record("expected compile failure")
         } catch let error as BQLCompileError {
             #expect(error == .invalidGroupByIndex(3))
+        }
+    }
+
+    @Test func compileInvalidPivotByIndexFails() throws {
+        do {
+            _ = try engine.run(
+                "SELECT account, year, sum(number) FROM #postings GROUP BY account, year PIVOT BY 1, 4"
+            )
+            Issue.record("expected compile failure")
+        } catch let error as BQLCompileError {
+            #expect(error == .invalidPivotByIndex(4))
+        }
+    }
+
+    @Test func compilePivotByMissingTargetFails() throws {
+        do {
+            _ = try engine.run(
+                "SELECT account, year, sum(number) FROM #postings GROUP BY account, year PIVOT BY account, missing"
+            )
+            Issue.record("expected compile failure")
+        } catch let error as BQLCompileError {
+            #expect(error == .pivotByColumnNotInTargets("missing"))
+        }
+    }
+
+    @Test func compilePivotByDuplicateColumnsFails() throws {
+        do {
+            _ = try engine.run(
+                "SELECT account, year, sum(number) FROM #postings GROUP BY account, year PIVOT BY 1, 1"
+            )
+            Issue.record("expected compile failure")
+        } catch let error as BQLCompileError {
+            #expect(error == .pivotByColumnsMustDiffer)
+        }
+    }
+
+    @Test func compilePivotBySecondMustBeGroupByColumnFails() throws {
+        do {
+            _ = try engine.run(
+                "SELECT account, year, sum(number) AS total FROM #postings GROUP BY account, year PIVOT BY account, total"
+            )
+            Issue.record("expected compile failure")
+        } catch let error as BQLCompileError {
+            #expect(error == .pivotBySecondMustBeGroupByColumn)
         }
     }
 

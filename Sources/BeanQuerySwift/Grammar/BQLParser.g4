@@ -11,10 +11,12 @@ bql
 statement
   : selectStmt
   | balancesStmt
+  | journalStmt
+  | printStmt
   ;
 
 selectStmt
-  : SELECT distinctClause? targets fromClause? whereClause? groupByClause? orderByClause? limitClause?
+  : SELECT distinctClause? targets fromClause? whereClause? groupByClause? orderByClause? pivotByClause? limitClause?
   ;
 
 distinctClause
@@ -93,11 +95,36 @@ limitClause
   : LIMIT integerLiteral
   ;
 
+pivotByClause
+  : PIVOT BY pivotByItem COMMA pivotByItem
+  ;
+
+pivotByItem
+  : integerLiteral
+  | columnRef
+  ;
+
 balancesStmt
   : BALANCES (AT identifier)? balancesFromClause? whereClause?
   ;
 
 balancesFromClause
+  : FROM fromExpr
+  ;
+
+journalStmt
+  : JOURNAL stringLiteral? (AT identifier)? journalFromClause?
+  ;
+
+journalFromClause
+  : FROM fromExpr
+  ;
+
+printStmt
+  : PRINT printFromClause?
+  ;
+
+printFromClause
   : FROM fromExpr
   ;
 

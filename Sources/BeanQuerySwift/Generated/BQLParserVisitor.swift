@@ -210,6 +210,26 @@ internal class BQLParserVisitor<T>: ParseTreeVisitor<T> {
 	}
 
 	/**
+	 * Visit a parse tree produced by {@link BQLParser#pivotByClause}.
+	- Parameters:
+	  - ctx: the parse tree
+	- returns: the visitor result
+	 */
+	internal func visitPivotByClause(_ ctx: BQLParser.PivotByClauseContext) -> T {
+	 	fatalError(#function + " must be overridden")
+	}
+
+	/**
+	 * Visit a parse tree produced by {@link BQLParser#pivotByItem}.
+	- Parameters:
+	  - ctx: the parse tree
+	- returns: the visitor result
+	 */
+	internal func visitPivotByItem(_ ctx: BQLParser.PivotByItemContext) -> T {
+	 	fatalError(#function + " must be overridden")
+	}
+
+	/**
 	 * Visit a parse tree produced by {@link BQLParser#balancesStmt}.
 	- Parameters:
 	  - ctx: the parse tree
@@ -226,6 +246,46 @@ internal class BQLParserVisitor<T>: ParseTreeVisitor<T> {
 	- returns: the visitor result
 	 */
 	internal func visitBalancesFromClause(_ ctx: BQLParser.BalancesFromClauseContext) -> T {
+	 	fatalError(#function + " must be overridden")
+	}
+
+	/**
+	 * Visit a parse tree produced by {@link BQLParser#journalStmt}.
+	- Parameters:
+	  - ctx: the parse tree
+	- returns: the visitor result
+	 */
+	internal func visitJournalStmt(_ ctx: BQLParser.JournalStmtContext) -> T {
+	 	fatalError(#function + " must be overridden")
+	}
+
+	/**
+	 * Visit a parse tree produced by {@link BQLParser#journalFromClause}.
+	- Parameters:
+	  - ctx: the parse tree
+	- returns: the visitor result
+	 */
+	internal func visitJournalFromClause(_ ctx: BQLParser.JournalFromClauseContext) -> T {
+	 	fatalError(#function + " must be overridden")
+	}
+
+	/**
+	 * Visit a parse tree produced by {@link BQLParser#printStmt}.
+	- Parameters:
+	  - ctx: the parse tree
+	- returns: the visitor result
+	 */
+	internal func visitPrintStmt(_ ctx: BQLParser.PrintStmtContext) -> T {
+	 	fatalError(#function + " must be overridden")
+	}
+
+	/**
+	 * Visit a parse tree produced by {@link BQLParser#printFromClause}.
+	- Parameters:
+	  - ctx: the parse tree
+	- returns: the visitor result
+	 */
+	internal func visitPrintFromClause(_ ctx: BQLParser.PrintFromClauseContext) -> T {
 	 	fatalError(#function + " must be overridden")
 	}
 

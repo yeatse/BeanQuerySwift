@@ -7,6 +7,10 @@ enum BQLAstDumper {
             return dump(select)
         case .balances(let balances):
             return dump(balances)
+        case .journal(let journal):
+            return dump(journal)
+        case .print(let print):
+            return dump(print)
         }
     }
 
@@ -27,10 +31,11 @@ enum BQLAstDumper {
         let whereClause = select.where.map { " WHERE \(dump($0))" } ?? ""
         let groupBy = select.groupBy.map(dump) ?? ""
         let orderBy = select.orderBy.map(dump) ?? ""
+        let pivotBy = select.pivotBy.map(dump) ?? ""
         let limit = select.limit.map { " LIMIT \($0)" } ?? ""
         let distinct = select.distinct ? "DISTINCT " : ""
 
-        return "SELECT \(distinct)\(targets)\(from)\(whereClause)\(groupBy)\(orderBy)\(limit)"
+        return "SELECT \(distinct)\(targets)\(from)\(whereClause)\(groupBy)\(orderBy)\(pivotBy)\(limit)"
     }
 
     private static func dump(_ balances: BQLBalancesStatement) -> String {
@@ -38,6 +43,18 @@ enum BQLAstDumper {
         let from = balances.from.map { " FROM \(dump($0))" } ?? ""
         let whereClause = balances.where.map { " WHERE \(dump($0))" } ?? ""
         return "BALANCES\(summary)\(from)\(whereClause)"
+    }
+
+    private static func dump(_ journal: BQLJournalStatement) -> String {
+        let account = journal.account.map { " '\($0)'" } ?? ""
+        let summary = journal.summaryFunction.map { " AT \($0)" } ?? ""
+        let from = journal.from.map { " FROM \(dump($0))" } ?? ""
+        return "JOURNAL\(account)\(summary)\(from)"
+    }
+
+    private static func dump(_ print: BQLPrintStatement) -> String {
+        let from = print.from.map { " FROM \(dump($0))" } ?? ""
+        return "PRINT\(from)"
     }
 
     private static func dump(_ from: BQLFromClause) -> String {
@@ -103,6 +120,18 @@ enum BQLAstDumper {
             return value + ordering
         }.joined(separator: ", ")
         return " ORDER BY \(items)"
+    }
+
+    private static func dump(_ pivotBy: BQLPivotByClause) -> String {
+        let items = pivotBy.items.map { item in
+            switch item {
+            case .index(let index):
+                return String(index)
+            case .column(let name):
+                return name
+            }
+        }.joined(separator: ", ")
+        return " PIVOT BY \(items)"
     }
 
     private static func dump(_ expression: BQLExpression) -> String {

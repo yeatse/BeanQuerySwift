@@ -40,6 +40,8 @@ private struct FunctionRegistry {
         FunctionSignature(name: "min", arguments: [.object], result: .object),
         FunctionSignature(name: "max", arguments: [.object], result: .object),
         FunctionSignature(name: "units", arguments: [.object], result: .object),
+        FunctionSignature(name: "cost", arguments: [.object], result: .object),
+        FunctionSignature(name: "maxwidth", arguments: [.string, .int], result: .string),
         FunctionSignature(name: "account_sortkey", arguments: [.string], result: .string),
     ]
 
@@ -400,8 +402,17 @@ struct ExpressionTypeChecker {
         guard args.count == expectedCount else { return nil }
 
         switch name.lowercased() {
-        case "units", "account_sortkey":
+        case "units", "cost", "account_sortkey":
             return args.first
+        case "maxwidth":
+            guard args.count == 2,
+                  case .string(let text) = args[0],
+                  case .integer(let width) = args[1]
+            else {
+                return nil
+            }
+            let clipped = String(text.prefix(max(width, 0)))
+            return .string(clipped)
         default:
             return nil
         }

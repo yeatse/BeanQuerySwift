@@ -24,6 +24,10 @@ struct BQLCompiler {
             return try compileSelect(select, context: context)
         case .balances(let balances):
             return try compileSelect(transformBalances(balances), context: context)
+        case .journal(let journal):
+            return try compileSelect(transformJournal(journal), context: context)
+        case .print(let print):
+            return try compilePrint(print, context: context)
         }
     }
 
@@ -48,6 +52,12 @@ struct BQLCompiler {
         let orderResult = try compileOrderBy(select.orderBy, existingTargets: targets)
         targets.append(contentsOf: orderResult.newTargets)
 
+        let pivotIndexes = try compilePivotBy(
+            select.pivotBy,
+            targets: targets,
+            groupIndexes: groupResult.groupIndexes
+        )
+
         if let groupIndexes = groupResult.groupIndexes {
             let nonAggregateIndexes = Set(targets.enumerated().compactMap { index, target in
                 target.isAggregate ? nil : index
@@ -68,8 +78,43 @@ struct BQLCompiler {
             groupIndexes: groupResult.groupIndexes,
             havingIndex: groupResult.havingIndex,
             orderSpec: orderResult.orderSpec,
+            pivotIndexes: pivotIndexes,
             limit: select.limit,
             distinct: select.distinct
+        )
+    }
+
+    private func compilePrint(
+        _ printStatement: BQLPrintStatement,
+        context: QueryContext?
+    ) throws -> EvalQuery {
+        let source: EvalSource
+        let filter: BQLExpression?
+
+        if let from = printStatement.from {
+            let compiledFrom = try compileFrom(
+                .expression(from),
+                context: context,
+                defaultTableName: "entries"
+            )
+            source = EvalSource(table: compiledFrom.table, qualifiers: compiledFrom.qualifiers)
+            filter = compiledFrom.filter
+        } else {
+            source = EvalSource(table: .named("entries"), qualifiers: nil)
+            filter = nil
+        }
+
+        let targets = try compileTargets(.asterisk, source: source, context: context)
+        return EvalQuery(
+            source: source,
+            targets: targets,
+            filter: filter,
+            groupIndexes: nil,
+            havingIndex: nil,
+            orderSpec: nil,
+            pivotIndexes: nil,
+            limit: nil,
+            distinct: false
         )
     }
 
@@ -157,6 +202,10 @@ struct BQLCompiler {
             appendPlaceholders(in: select, to: &placeholders)
         case .balances(let balances):
             appendPlaceholders(in: balances, to: &placeholders)
+        case .journal(let journal):
+            appendPlaceholders(in: journal, to: &placeholders)
+        case .print(let print):
+            appendPlaceholders(in: print, to: &placeholders)
         }
     }
 
@@ -209,6 +258,24 @@ struct BQLCompiler {
         }
         if let filter = balances.where {
             appendPlaceholders(in: filter, to: &placeholders)
+        }
+    }
+
+    private func appendPlaceholders(
+        in journal: BQLJournalStatement,
+        to placeholders: inout [BQLPlaceholder]
+    ) {
+        if let from = journal.from, let expression = from.expression {
+            appendPlaceholders(in: expression, to: &placeholders)
+        }
+    }
+
+    private func appendPlaceholders(
+        in printStatement: BQLPrintStatement,
+        to placeholders: inout [BQLPlaceholder]
+    ) {
+        if let from = printStatement.from, let expression = from.expression {
+            appendPlaceholders(in: expression, to: &placeholders)
         }
     }
 
@@ -275,6 +342,10 @@ struct BQLCompiler {
             return .select(try bind(select, replacing: replacing))
         case .balances(let balances):
             return .balances(try bind(balances, replacing: replacing))
+        case .journal(let journal):
+            return .journal(try bind(journal, replacing: replacing))
+        case .print(let print):
+            return .print(try bind(print, replacing: replacing))
         }
     }
 
@@ -289,7 +360,9 @@ struct BQLCompiler {
             where: try select.where.map { try bind($0, replacing: replacing) },
             groupBy: try select.groupBy.map { try bind($0, replacing: replacing) },
             orderBy: try select.orderBy.map { try bind($0, replacing: replacing) },
-            limit: select.limit
+            pivotBy: select.pivotBy,
+            limit: select.limit,
+            sourceRange: select.sourceRange
         )
     }
 
@@ -304,10 +377,50 @@ struct BQLCompiler {
                     expression: try from.expression.map { try bind($0, replacing: replacing) },
                     open: from.open,
                     close: from.close,
-                    clear: from.clear
+                    clear: from.clear,
+                    sourceRange: from.sourceRange
                 )
             },
-            where: try balances.where.map { try bind($0, replacing: replacing) }
+            where: try balances.where.map { try bind($0, replacing: replacing) },
+            sourceRange: balances.sourceRange
+        )
+    }
+
+    private func bind(
+        _ journal: BQLJournalStatement,
+        replacing: (BQLPlaceholder) throws -> BQLExpression
+    ) throws -> BQLJournalStatement {
+        BQLJournalStatement(
+            account: journal.account,
+            summaryFunction: journal.summaryFunction,
+            from: try journal.from.map { from in
+                BQLFromExpression(
+                    expression: try from.expression.map { try bind($0, replacing: replacing) },
+                    open: from.open,
+                    close: from.close,
+                    clear: from.clear,
+                    sourceRange: from.sourceRange
+                )
+            },
+            sourceRange: journal.sourceRange
+        )
+    }
+
+    private func bind(
+        _ printStatement: BQLPrintStatement,
+        replacing: (BQLPlaceholder) throws -> BQLExpression
+    ) throws -> BQLPrintStatement {
+        BQLPrintStatement(
+            from: try printStatement.from.map { from in
+                BQLFromExpression(
+                    expression: try from.expression.map { try bind($0, replacing: replacing) },
+                    open: from.open,
+                    close: from.close,
+                    clear: from.clear,
+                    sourceRange: from.sourceRange
+                )
+            },
+            sourceRange: printStatement.sourceRange
         )
     }
 
@@ -322,7 +435,8 @@ struct BQLCompiler {
             return .values(try values.map { target in
                 BQLTarget(
                     expression: try bind(target.expression, replacing: replacing),
-                    alias: target.alias
+                    alias: target.alias,
+                    sourceRange: target.sourceRange
                 )
             })
         }
@@ -343,7 +457,8 @@ struct BQLCompiler {
                     expression: try expression.expression.map { try bind($0, replacing: replacing) },
                     open: expression.open,
                     close: expression.close,
-                    clear: expression.clear
+                    clear: expression.clear,
+                    sourceRange: expression.sourceRange
                 )
             )
         }
@@ -362,7 +477,8 @@ struct BQLCompiler {
                     return .expression(try bind(expression, replacing: replacing))
                 }
             },
-            having: try groupBy.having.map { try bind($0, replacing: replacing) }
+            having: try groupBy.having.map { try bind($0, replacing: replacing) },
+            sourceRange: groupBy.sourceRange
         )
     }
 
@@ -379,7 +495,7 @@ struct BQLCompiler {
                 value = .expression(try bind(expression, replacing: replacing))
             }
 
-            return BQLOrderByItem(value: value, ordering: item.ordering)
+            return BQLOrderByItem(value: value, ordering: item.ordering, sourceRange: item.sourceRange)
         }
     }
 
@@ -463,14 +579,16 @@ struct BQLCompiler {
 
     private func compileFrom(
         _ from: BQLFromClause?,
-        context: QueryContext?
+        context: QueryContext?,
+        defaultTableName: String? = nil
     ) throws -> (
         table: EvalTableReference,
         qualifiers: EvalQualifiers?,
         filter: BQLExpression?
     ) {
+        let fallbackTableName = defaultTableName ?? options.defaultTableName
         guard let from else {
-            return (.named(options.defaultTableName), nil, nil)
+            return (.named(fallbackTableName), nil, nil)
         }
 
         switch from {
@@ -509,7 +627,7 @@ struct BQLCompiler {
             }
 
             return (
-                .named(options.defaultTableName),
+                .named(fallbackTableName),
                 qualifiers,
                 normalizedFilter
             )
@@ -720,6 +838,57 @@ struct BQLCompiler {
         return (Array(targets.dropFirst(existingTargets.count)), specs)
     }
 
+    private func compilePivotBy(
+        _ pivotBy: BQLPivotByClause?,
+        targets: [EvalTarget],
+        groupIndexes: [Int]?
+    ) throws -> [Int]? {
+        guard let pivotBy else {
+            return nil
+        }
+
+        let visibleIndexes = targets.enumerated().compactMap { index, target in
+            target.name == nil ? nil : index
+        }
+        let names: [String: Int] = Dictionary(uniqueKeysWithValues: targets.enumerated().compactMap { index, target in
+            guard let name = target.name else { return nil }
+            return (name, index)
+        })
+
+        var indexes: [Int] = []
+
+        for item in pivotBy.items {
+            switch item {
+            case .index(let oneBased):
+                let resolved = oneBased - 1
+                guard resolved >= 0 && resolved < visibleIndexes.count else {
+                    throw BQLCompileError.invalidPivotByIndex(oneBased)
+                }
+                indexes.append(visibleIndexes[resolved])
+
+            case .column(let name):
+                guard let index = names[name] else {
+                    throw BQLCompileError.pivotByColumnNotInTargets(name)
+                }
+                indexes.append(index)
+            }
+        }
+
+        guard indexes.count == 2 else {
+            throw BQLCompileError.invalidPivotByClause
+        }
+
+        if indexes[0] == indexes[1] {
+            throw BQLCompileError.pivotByColumnsMustDiffer
+        }
+
+        guard let groupIndexes, groupIndexes.contains(indexes[1]) else {
+            throw BQLCompileError.pivotBySecondMustBeGroupByColumn
+        }
+
+        return indexes
+    }
+
     private func combineWithAnd(_ left: BQLExpression?, _ right: BQLExpression?) -> BQLExpression? {
         switch (left, right) {
         case (nil, nil):
@@ -888,6 +1057,62 @@ struct BQLCompiler {
             orderBy: [
                 BQLOrderByItem(value: .expression(sortKey), ordering: .ascending)
             ],
+            pivotBy: nil,
+            limit: nil
+        )
+    }
+
+    private func transformJournal(_ journal: BQLJournalStatement) -> BQLSelectStatement {
+        let date = BQLExpression.column("date")
+        let flag = BQLExpression.column("flag")
+        let payee = BQLExpression.column("payee")
+        let narration = BQLExpression.column("narration")
+        let account = BQLExpression.column("account")
+        let position = BQLExpression.column("position")
+        let balance = BQLExpression.column("balance")
+
+        let payeeWithWidth = BQLExpression.function(
+            name: "maxwidth",
+            args: [payee, .constant(.integer(48))]
+        )
+        let narrationWithWidth = BQLExpression.function(
+            name: "maxwidth",
+            args: [narration, .constant(.integer(80))]
+        )
+
+        let summaryPosition: BQLExpression
+        let summaryBalance: BQLExpression
+        if let summaryFunction = journal.summaryFunction {
+            summaryPosition = .function(name: summaryFunction, args: [position])
+            summaryBalance = .function(name: summaryFunction, args: [balance])
+        } else {
+            summaryPosition = position
+            summaryBalance = balance
+        }
+
+        let accountFilter: BQLExpression?
+        if let accountPattern = journal.account {
+            accountFilter = .binary(.match, account, .constant(.string(accountPattern)))
+        } else {
+            accountFilter = nil
+        }
+
+        return BQLSelectStatement(
+            distinct: false,
+            targets: .values([
+                BQLTarget(expression: date, alias: nil),
+                BQLTarget(expression: flag, alias: nil),
+                BQLTarget(expression: payeeWithWidth, alias: nil),
+                BQLTarget(expression: narrationWithWidth, alias: nil),
+                BQLTarget(expression: account, alias: nil),
+                BQLTarget(expression: summaryPosition, alias: nil),
+                BQLTarget(expression: summaryBalance, alias: nil),
+            ]),
+            from: journal.from.map { .expression($0) },
+            where: accountFilter,
+            groupBy: nil,
+            orderBy: nil,
+            pivotBy: nil,
             limit: nil
         )
     }

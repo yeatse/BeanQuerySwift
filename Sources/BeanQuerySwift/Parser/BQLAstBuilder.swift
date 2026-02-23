@@ -15,6 +15,14 @@ struct BQLAstBuilder {
             return .balances(try buildBalances(balances))
         }
 
+        if let journal = statement.journalStmt() {
+            return .journal(try buildJournal(journal))
+        }
+
+        if let print = statement.printStmt() {
+            return .print(try buildPrint(print))
+        }
+
         throw BQLASTBuildError("unsupported statement")
     }
 
@@ -26,6 +34,7 @@ struct BQLAstBuilder {
             where: try buildWhere(ctx.whereClause()),
             groupBy: try buildGroupBy(ctx.groupByClause()),
             orderBy: try buildOrderBy(ctx.orderByClause()),
+            pivotBy: try buildPivotBy(ctx.pivotByClause()),
             limit: try buildLimit(ctx.limitClause()),
             sourceRange: sourceRange(ctx)
         )
@@ -38,6 +47,26 @@ struct BQLAstBuilder {
                 try buildFromExpr(require(fromClause.fromExpr(), "missing from expression"))
             },
             where: try buildWhere(ctx.whereClause()),
+            sourceRange: sourceRange(ctx)
+        )
+    }
+
+    private static func buildJournal(_ ctx: BQLParser.JournalStmtContext) throws -> BQLJournalStatement {
+        BQLJournalStatement(
+            account: try ctx.stringLiteral().map(buildStringLiteral),
+            summaryFunction: try ctx.identifier().map(buildIdentifier),
+            from: try ctx.journalFromClause().map { fromClause in
+                try buildFromExpr(require(fromClause.fromExpr(), "missing from expression"))
+            },
+            sourceRange: sourceRange(ctx)
+        )
+    }
+
+    private static func buildPrint(_ ctx: BQLParser.PrintStmtContext) throws -> BQLPrintStatement {
+        BQLPrintStatement(
+            from: try ctx.printFromClause().map { fromClause in
+                try buildFromExpr(require(fromClause.fromExpr(), "missing from expression"))
+            },
             sourceRange: sourceRange(ctx)
         )
     }
@@ -176,6 +205,28 @@ struct BQLAstBuilder {
     private static func buildLimit(_ ctx: BQLParser.LimitClauseContext?) throws -> Int? {
         guard let literal = ctx?.integerLiteral() else { return nil }
         return try buildInt(literal)
+    }
+
+    private static func buildPivotBy(_ ctx: BQLParser.PivotByClauseContext?) throws -> BQLPivotByClause? {
+        guard let ctx else { return nil }
+
+        let items = try ctx.pivotByItem().map { item in
+            if let index = item.integerLiteral() {
+                return BQLPivotByItem.index(try buildInt(index))
+            }
+
+            if let column = item.columnRef()?.identifier() {
+                return BQLPivotByItem.column(try buildIdentifier(column))
+            }
+
+            throw BQLASTBuildError("invalid PIVOT BY item")
+        }
+
+        guard items.count == 2 else {
+            throw BQLASTBuildError("PIVOT BY requires exactly two columns")
+        }
+
+        return BQLPivotByClause(items: items, sourceRange: sourceRange(ctx))
     }
 
     private static func buildExpression(_ ctx: BQLParser.ExpressionContext) throws -> BQLExpression {

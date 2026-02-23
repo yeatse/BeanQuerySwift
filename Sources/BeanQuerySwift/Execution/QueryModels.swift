@@ -79,6 +79,7 @@ enum BQLExecutionError: LocalizedError, Equatable {
     case unsupportedFunction(String)
     case unsupportedOperator
     case invalidType
+    case invalidPivotByColumns
     
     var errorDescription: String? {
         switch self {
@@ -94,6 +95,8 @@ enum BQLExecutionError: LocalizedError, Equatable {
             return "unsupported operator"
         case .invalidType:
             return "invalid runtime type"
+        case .invalidPivotByColumns:
+            return "invalid PIVOT BY columns"
         }
     }
 }
