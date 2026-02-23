@@ -3,7 +3,7 @@ import Testing
 import BeancountSwift
 @testable import BeanQuerySwift
 
-@Suite(.serialized)
+@Suite
 struct BeancountSourceAdapterTests {
     private let engine = BeanQueryEngine()
 

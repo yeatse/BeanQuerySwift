@@ -29,9 +29,6 @@ let package = Package(
             exclude: [
                 "Grammar",
             ],
-            swiftSettings: [
-                .unsafeFlags(["-Xfrontend", "-strict-concurrency=minimal"]),
-            ]
         ),
         .testTarget(
             name: "BeanQuerySwiftTests",

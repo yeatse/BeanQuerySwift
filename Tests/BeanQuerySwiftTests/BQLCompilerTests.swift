@@ -2,7 +2,7 @@ import Foundation
 import Testing
 @testable import BeanQuerySwift
 
-@Suite(.serialized)
+@Suite
 struct BQLCompilerTests {
     private let engine = BeanQueryEngine()
     private static let compileableQueries: [String] = [

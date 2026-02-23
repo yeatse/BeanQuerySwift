@@ -2,7 +2,7 @@ import Foundation
 import Testing
 @testable import BeanQuerySwift
 
-@Suite(.serialized)
+@Suite
 struct BQLParserFacadeTests {
     private static let validQueries: [String] = [
         "SELECT account FROM #postings",

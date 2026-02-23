@@ -2,7 +2,7 @@ import Foundation
 import Testing
 @testable import BeanQuerySwift
 
-@Suite(.serialized)
+@Suite
 struct BQLExecutionTests {
     private let engine = BeanQueryEngine()
 
