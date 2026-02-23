@@ -153,14 +153,14 @@ indirect enum BQLExpression: Equatable {
     case asterisk
 }
 
-struct BQLASTBuildError: Error, CustomStringConvertible, Equatable {
+struct BQLASTBuildError: LocalizedError, Equatable {
     let message: String
 
     init(_ message: String) {
         self.message = message
     }
 
-    var description: String {
+    var errorDescription: String? {
         message
     }
 }

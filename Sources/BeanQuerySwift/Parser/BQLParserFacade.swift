@@ -9,10 +9,10 @@ struct BQLSyntaxError: Error, Equatable, Sendable {
     let range: BQLSourceRange?
 }
 
-struct BQLParseError: Error, CustomStringConvertible, Sendable {
+struct BQLParseError: LocalizedError, Sendable {
     let errors: [BQLSyntaxError]
-
-    var description: String {
+    
+    var errorDescription: String? {
         errors
             .map { error in
                 let tokenPart = error.token.map { " token='\($0)'" } ?? ""

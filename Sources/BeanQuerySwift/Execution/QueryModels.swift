@@ -72,15 +72,15 @@ public struct QueryResult: Equatable, Sendable {
     }
 }
 
-enum BQLExecutionError: Error, Equatable, CustomStringConvertible {
+enum BQLExecutionError: LocalizedError, Equatable {
     case tableNotFound(String)
     case qualifiersUnsupported(String)
     case unsupportedExpression(String)
     case unsupportedFunction(String)
     case unsupportedOperator
     case invalidType
-
-    var description: String {
+    
+    var errorDescription: String? {
         switch self {
         case .tableNotFound(let name):
             return "table not found: \(name)"

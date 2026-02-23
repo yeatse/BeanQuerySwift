@@ -63,7 +63,7 @@ public struct EvalQuery: Equatable {
     }
 }
 
-enum BQLCompileError: Error, Equatable, CustomStringConvertible {
+enum BQLCompileError: LocalizedError, Equatable {
     case unsupportedStatement(String)
     case invalidGroupByIndex(Int)
     case invalidOrderByIndex(Int)
@@ -86,8 +86,8 @@ enum BQLCompileError: Error, Equatable, CustomStringConvertible {
     case missingGroupByTargets([String])
     case closeDateMustFollowOpenDate
     case invalidFromClause
-
-    var description: String {
+    
+    var errorDescription: String? {
         switch self {
         case .unsupportedStatement(let statement):
             return "unsupported statement: \(statement)"
