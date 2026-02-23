@@ -1,9 +1,50 @@
 import Foundation
+import BeancountSwift
 
 struct QueryExecutor {
+    private final class EvaluationState {
+        private var resolvedBalance: RuntimeValue?
+        private var runningBalance = Inventory()
+
+        func beginRow() {
+            resolvedBalance = nil
+        }
+
+        func resolveBalance(for row: QueryRow) -> RuntimeValue {
+            if let resolvedBalance {
+                return resolvedBalance
+            }
+
+            let value: RuntimeValue
+            if let position = row["position"] {
+                switch position {
+                case .position(let postingPosition):
+                    _ = runningBalance.addAmount(postingPosition.units, cost: postingPosition.cost)
+                    value = .inventory(runningBalance)
+
+                case .amount(let amount):
+                    _ = runningBalance.addAmount(amount)
+                    value = .inventory(runningBalance)
+
+                case .inventory(let inventory):
+                    runningBalance = runningBalance + inventory
+                    value = .inventory(runningBalance)
+
+                default:
+                    value = row["balance"] ?? .null
+                }
+            } else {
+                value = row["balance"] ?? .null
+            }
+
+            resolvedBalance = value
+            return value
+        }
+    }
+
     func execute(_ query: EvalQuery, context: QueryContext) throws -> QueryResult {
         let sourceRows = try loadSourceRows(query.source, context: context)
-        let fullRows = try evaluateRows(query: query, rows: sourceRows)
+        let fullRows = try evaluateRows(query: query, rows: sourceRows, context: context)
 
         let visible = query.targets.enumerated().compactMap { index, target in
             target.name == nil ? nil : (index, target.name!)
@@ -92,18 +133,37 @@ struct QueryExecutor {
         }
     }
 
-    private func evaluateRows(query: EvalQuery, rows: [QueryRow]) throws -> [[RuntimeValue]] {
+    private func evaluateRows(
+        query: EvalQuery,
+        rows: [QueryRow],
+        context: QueryContext
+    ) throws -> [[RuntimeValue]] {
         if query.groupIndexes == nil {
             var output: [[RuntimeValue]] = []
+            let state = EvaluationState()
             for row in rows {
+                state.beginRow()
+
                 if let filter = query.filter {
-                    guard try evaluateBoolean(filter, row: row, group: nil) else {
+                    guard try evaluateBoolean(
+                        filter,
+                        row: row,
+                        group: nil,
+                        context: context,
+                        state: state
+                    ) else {
                         continue
                     }
                 }
 
                 let values = try query.targets.map { target in
-                    try evaluateExpression(target.expression, row: row, group: nil)
+                    try evaluateExpression(
+                        target.expression,
+                        row: row,
+                        group: nil,
+                        context: context,
+                        state: state
+                    )
                 }
                 output.append(values)
             }
@@ -112,18 +172,36 @@ struct QueryExecutor {
 
         let groupIndexes = query.groupIndexes ?? []
         var buckets: [GroupKey: [QueryRow]] = [:]
+        let state = EvaluationState()
 
         for row in rows {
+            state.beginRow()
+
             if let filter = query.filter {
-                guard try evaluateBoolean(filter, row: row, group: nil) else {
+                guard try evaluateBoolean(
+                    filter,
+                    row: row,
+                    group: nil,
+                    context: context,
+                    state: state
+                ) else {
                     continue
                 }
             }
 
+            var effectiveRow = row
+            effectiveRow["balance"] = state.resolveBalance(for: row)
+
             let keyValues = try groupIndexes.map { index in
-                try evaluateExpression(query.targets[index].expression, row: row, group: nil)
+                try evaluateExpression(
+                    query.targets[index].expression,
+                    row: effectiveRow,
+                    group: nil,
+                    context: context,
+                    state: nil
+                )
             }
-            buckets[GroupKey(values: keyValues), default: []].append(row)
+            buckets[GroupKey(values: keyValues), default: []].append(effectiveRow)
         }
 
         var output: [[RuntimeValue]] = []
@@ -131,7 +209,13 @@ struct QueryExecutor {
             guard let first = groupRows.first else { continue }
 
             let values = try query.targets.map { target in
-                try evaluateExpression(target.expression, row: first, group: groupRows)
+                try evaluateExpression(
+                    target.expression,
+                    row: first,
+                    group: groupRows,
+                    context: context,
+                    state: nil
+                )
             }
 
             if let havingIndex = query.havingIndex {
@@ -228,14 +312,29 @@ struct QueryExecutor {
         return (outputColumns, outputRows)
     }
 
-    private func evaluateBoolean(_ expression: BQLExpression, row: QueryRow, group: [QueryRow]?) throws -> Bool {
-        let value = try evaluateExpression(expression, row: row, group: group)
+    private func evaluateBoolean(
+        _ expression: BQLExpression,
+        row: QueryRow,
+        group: [QueryRow]?,
+        context: QueryContext,
+        state: EvaluationState?
+    ) throws -> Bool {
+        let value = try evaluateExpression(expression, row: row, group: group, context: context, state: state)
         return try asBool(value)
     }
 
-    private func evaluateExpression(_ expression: BQLExpression, row: QueryRow, group: [QueryRow]?) throws -> RuntimeValue {
+    private func evaluateExpression(
+        _ expression: BQLExpression,
+        row: QueryRow,
+        group: [QueryRow]?,
+        context: QueryContext,
+        state: EvaluationState?
+    ) throws -> RuntimeValue {
         switch expression {
         case .column(let name):
+            if name.lowercased() == "balance", let state {
+                return state.resolveBalance(for: row)
+            }
             return row[name] ?? .null
 
         case .constant(let literal):
@@ -245,7 +344,7 @@ struct QueryExecutor {
             throw BQLExecutionError.unsupportedExpression("placeholder \(placeholder)")
 
         case .unary(let op, let operand):
-            let value = try evaluateExpression(operand, row: row, group: group)
+            let value = try evaluateExpression(operand, row: row, group: group, context: context, state: state)
             switch op {
             case .not:
                 return .bool(try !asBool(value))
@@ -256,6 +355,15 @@ struct QueryExecutor {
                 if let decimal = asDecimal(value) {
                     return .decimal(-decimal)
                 }
+                if let amount = asAmount(value) {
+                    return .amount(-amount)
+                }
+                if let position = asPosition(value) {
+                    return .position(-position)
+                }
+                if let inventory = asInventory(value) {
+                    return .inventory(-inventory)
+                }
                 throw BQLExecutionError.invalidType
             case .isNull:
                 return .bool(value == .null)
@@ -264,13 +372,13 @@ struct QueryExecutor {
             }
 
         case .binary(let op, let leftExpr, let rightExpr):
-            let left = try evaluateExpression(leftExpr, row: row, group: group)
-            let right = try evaluateExpression(rightExpr, row: row, group: group)
+            let left = try evaluateExpression(leftExpr, row: row, group: group, context: context, state: state)
+            let right = try evaluateExpression(rightExpr, row: row, group: group, context: context, state: state)
             return try evaluateBinary(op: op, left: left, right: right)
 
         case .and(let args):
             for arg in args {
-                if try !evaluateBoolean(arg, row: row, group: group) {
+                if try !evaluateBoolean(arg, row: row, group: group, context: context, state: state) {
                     return .bool(false)
                 }
             }
@@ -278,24 +386,24 @@ struct QueryExecutor {
 
         case .or(let args):
             for arg in args {
-                if try evaluateBoolean(arg, row: row, group: group) {
+                if try evaluateBoolean(arg, row: row, group: group, context: context, state: state) {
                     return .bool(true)
                 }
             }
             return .bool(false)
 
         case .between(let valueExpr, let lowerExpr, let upperExpr):
-            let value = try evaluateExpression(valueExpr, row: row, group: group)
-            let lower = try evaluateExpression(lowerExpr, row: row, group: group)
-            let upper = try evaluateExpression(upperExpr, row: row, group: group)
+            let value = try evaluateExpression(valueExpr, row: row, group: group, context: context, state: state)
+            let lower = try evaluateExpression(lowerExpr, row: row, group: group, context: context, state: state)
+            let upper = try evaluateExpression(upperExpr, row: row, group: group, context: context, state: state)
             let lowerCmp = compare(value, lower)
             let upperCmp = compare(value, upper)
             return .bool((lowerCmp == .orderedSame || lowerCmp == .orderedDescending)
                          && (upperCmp == .orderedSame || upperCmp == .orderedAscending))
 
         case .anyAll(let op, let quantifier, let leftExpr, let rightExpr):
-            let left = try evaluateExpression(leftExpr, row: row, group: group)
-            let right = try evaluateExpression(rightExpr, row: row, group: group)
+            let left = try evaluateExpression(leftExpr, row: row, group: group, context: context, state: state)
+            let right = try evaluateExpression(rightExpr, row: row, group: group, context: context, state: state)
             guard case .list(let values) = right else {
                 throw BQLExecutionError.invalidType
             }
@@ -325,7 +433,14 @@ struct QueryExecutor {
             return .null
 
         case .function(let name, let args):
-            return try evaluateFunction(name: name, args: args, row: row, group: group)
+            return try evaluateFunction(
+                name: name,
+                args: args,
+                row: row,
+                group: group,
+                context: context,
+                state: state
+            )
         }
     }
 
@@ -333,7 +448,9 @@ struct QueryExecutor {
         name: String,
         args: [BQLExpression],
         row: QueryRow,
-        group: [QueryRow]?
+        group: [QueryRow]?,
+        context: QueryContext,
+        state: EvaluationState?
     ) throws -> RuntimeValue {
         let normalized = name.lowercased()
 
@@ -341,16 +458,48 @@ struct QueryExecutor {
             guard let group else {
                 throw BQLExecutionError.unsupportedFunction(name)
             }
-            return try evaluateAggregateFunction(name: normalized, args: args, rows: group)
+            return try evaluateAggregateFunction(
+                name: normalized,
+                args: args,
+                rows: group,
+                context: context,
+                state: state
+            )
         }
 
-        let values = try args.map { try evaluateExpression($0, row: row, group: group) }
+        let values = try args.map { try evaluateExpression($0, row: row, group: group, context: context, state: state) }
 
         switch normalized {
         case "units":
-            return values.first ?? .null
+            guard values.count == 1 else {
+                throw BQLExecutionError.unsupportedFunction(name)
+            }
+            return try units(values[0])
         case "cost":
-            return values.first ?? .null
+            guard values.count == 1 else {
+                throw BQLExecutionError.unsupportedFunction(name)
+            }
+            return try cost(values[0])
+        case "weight":
+            guard values.count == 1 else {
+                throw BQLExecutionError.unsupportedFunction(name)
+            }
+            return try weight(values[0])
+        case "value":
+            guard values.count == 1 || values.count == 2 else {
+                throw BQLExecutionError.unsupportedFunction(name)
+            }
+
+            let date: Date?
+            if values.count == 2 {
+                guard case .date(let suppliedDate) = values[1] else {
+                    throw BQLExecutionError.invalidType
+                }
+                date = suppliedDate
+            } else {
+                date = nil
+            }
+            return try value(values[0], date: date, context: context)
         case "maxwidth":
             guard values.count == 2 else {
                 throw BQLExecutionError.unsupportedFunction(name)
@@ -370,36 +519,115 @@ struct QueryExecutor {
         }
     }
 
-    private func evaluateAggregateFunction(name: String, args: [BQLExpression], rows: [QueryRow]) throws -> RuntimeValue {
+    private func units(_ value: RuntimeValue) throws -> RuntimeValue {
+        switch value {
+        case .int, .decimal, .amount:
+            return value
+        case .position(let position):
+            return .amount(position.units)
+        case .inventory(let inventory):
+            return .inventory(inventory.reduce { $0.units })
+        case .null:
+            return .null
+        default:
+            throw BQLExecutionError.invalidType
+        }
+    }
+
+    private func cost(_ value: RuntimeValue) throws -> RuntimeValue {
+        switch value {
+        case .int, .decimal, .amount:
+            return value
+        case .position(let position):
+            return .amount(position.totalCost)
+        case .inventory(let inventory):
+            return .inventory(inventory.reduce { $0.totalCost })
+        case .null:
+            return .null
+        default:
+            throw BQLExecutionError.invalidType
+        }
+    }
+
+    private func weight(_ value: RuntimeValue) throws -> RuntimeValue {
+        switch value {
+        case .int, .decimal, .amount:
+            return value
+        case .position(let position):
+            return .amount(position.weight)
+        case .inventory(let inventory):
+            return .inventory(inventory.reduce { $0.weight })
+        case .null:
+            return .null
+        default:
+            throw BQLExecutionError.invalidType
+        }
+    }
+
+    private func value(
+        _ input: RuntimeValue,
+        date: Date?,
+        context: QueryContext
+    ) throws -> RuntimeValue {
+        switch input {
+        case .int, .decimal, .amount:
+            return input
+        case .position(let position):
+            guard let priceMap = context.priceMap else {
+                return .amount(position.units)
+            }
+            return .amount(position.marketValue(from: priceMap, date: date))
+
+        case .inventory(let inventory):
+            guard let priceMap = context.priceMap else {
+                return .inventory(inventory.reduce { $0.units })
+            }
+            return .inventory(inventory.reduce { $0.marketValue(from: priceMap, date: date) })
+
+        case .null:
+            return .null
+
+        default:
+            throw BQLExecutionError.invalidType
+        }
+    }
+
+    private func evaluateAggregateFunction(
+        name: String,
+        args: [BQLExpression],
+        rows: [QueryRow],
+        context: QueryContext,
+        state: EvaluationState?
+    ) throws -> RuntimeValue {
         switch name {
         case "count":
             if args.count == 1, args[0] == .asterisk {
                 return .int(rows.count)
             }
-            let values = try evaluateOverRows(args.first, rows: rows)
+            let values = try evaluateOverRows(args.first, rows: rows, context: context, state: state)
             return .int(values.filter { $0 != .null }.count)
 
         case "sum":
-            let values = try evaluateOverRows(args.first, rows: rows)
+            let values = try evaluateOverRows(args.first, rows: rows, context: context, state: state)
             return try sum(values)
 
         case "first":
-            let values = try evaluateOverRows(args.first, rows: rows)
+            let values = try evaluateOverRows(args.first, rows: rows, context: context, state: state)
             return values.first ?? .null
 
         case "last":
-            let values = try evaluateOverRows(args.first, rows: rows)
+            let values = try evaluateOverRows(args.first, rows: rows, context: context, state: state)
             return values.last ?? .null
 
         case "min":
-            let values = try evaluateOverRows(args.first, rows: rows).filter { $0 != .null }
+            let values = try evaluateOverRows(args.first, rows: rows, context: context, state: state).filter { $0 != .null }
             guard let minValue = values.min(by: { compare($0, $1) == .orderedAscending }) else {
                 return .null
             }
             return minValue
 
         case "max":
-            let values = try evaluateOverRows(args.first, rows: rows).filter { $0 != .null }
+            let values = try evaluateOverRows(args.first, rows: rows, context: context, state: state).filter { $0 != .null }
             guard let maxValue = values.max(by: { compare($0, $1) == .orderedAscending }) else {
                 return .null
             }
@@ -410,13 +638,19 @@ struct QueryExecutor {
         }
     }
 
-    private func evaluateOverRows(_ expression: BQLExpression?, rows: [QueryRow]) throws -> [RuntimeValue] {
+    private func evaluateOverRows(
+        _ expression: BQLExpression?,
+        rows: [QueryRow],
+        context: QueryContext,
+        state: EvaluationState?
+    ) throws -> [RuntimeValue] {
         guard let expression else {
             return []
         }
 
         return try rows.map { row in
-            try evaluateExpression(expression, row: row, group: nil)
+            state?.beginRow()
+            return try evaluateExpression(expression, row: row, group: nil, context: context, state: state)
         }
     }
 
@@ -535,13 +769,31 @@ struct QueryExecutor {
             return .decimal(total)
         }
 
-        let total = try nonNull.reduce(0) { partial, value in
-            guard let int = asInt(value) else {
+        if nonNull.allSatisfy({
+            if case .int = $0 { return true }
+            return false
+        }) {
+            let total = nonNull.reduce(0) { partial, value in
+                guard case .int(let int) = value else { return partial }
+                return partial + int
+            }
+            return .int(total)
+        }
+
+        var inventory = Inventory()
+        for value in nonNull {
+            switch value {
+            case .amount(let amount):
+                _ = inventory.addAmount(amount)
+            case .position(let position):
+                _ = inventory.addAmount(position.units, cost: position.cost)
+            case .inventory(let partial):
+                inventory = inventory + partial
+            default:
                 throw BQLExecutionError.invalidType
             }
-            return partial + int
         }
-        return .int(total)
+        return .inventory(inventory)
     }
 
     private func mapLiteral(_ literal: BQLLiteral) throws -> RuntimeValue {
@@ -579,6 +831,27 @@ struct QueryExecutor {
         }
     }
 
+    private func asAmount(_ value: RuntimeValue) -> Amount? {
+        if case .amount(let amount) = value {
+            return amount
+        }
+        return nil
+    }
+
+    private func asPosition(_ value: RuntimeValue) -> Position? {
+        if case .position(let position) = value {
+            return position
+        }
+        return nil
+    }
+
+    private func asInventory(_ value: RuntimeValue) -> Inventory? {
+        if case .inventory(let inventory) = value {
+            return inventory
+        }
+        return nil
+    }
+
     private func asInt(_ value: RuntimeValue) -> Int? {
         if case .int(let int) = value {
             return int
@@ -601,6 +874,21 @@ struct QueryExecutor {
         }
 
         switch (left, right) {
+        case (.amount(let lhs), .amount(let rhs)):
+            if lhs < rhs { return .orderedAscending }
+            if lhs > rhs { return .orderedDescending }
+            return .orderedSame
+
+        case (.position(let lhs), .position(let rhs)):
+            if lhs < rhs { return .orderedAscending }
+            if lhs > rhs { return .orderedDescending }
+            return .orderedSame
+
+        case (.inventory(let lhs), .inventory(let rhs)):
+            if lhs < rhs { return .orderedAscending }
+            if lhs > rhs { return .orderedDescending }
+            return .orderedSame
+
         case (.string(let lhs), .string(let rhs)):
             if lhs < rhs { return .orderedAscending }
             if lhs > rhs { return .orderedDescending }
@@ -634,6 +922,12 @@ struct QueryExecutor {
             return String(number)
         case .decimal(let number):
             return NSDecimalNumber(decimal: number).stringValue
+        case .amount(let amount):
+            return amount.description
+        case .position(let position):
+            return position.description
+        case .inventory(let inventory):
+            return inventory.description
         case .string(let text):
             return text
         case .bool(let value):

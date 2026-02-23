@@ -38,12 +38,14 @@ public enum BeancountQueryContextBuilder {
             providers: [
                 "postings": postingsProvider,
                 "entries": entriesProvider,
-            ]
+            ],
+            priceMap: PriceMap.build(from: directives.sorted())
         )
     }
 
     fileprivate static func buildPostingsRows(directives: [Directive<Cost>]) -> [QueryRow] {
         var rows: [QueryRow] = []
+        var runningBalance = Inventory()
         let calendar = Calendar(identifier: .gregorian)
 
         for directive in directives {
@@ -60,8 +62,25 @@ public enum BeancountQueryContextBuilder {
 
                 row["account"] = .string(posting.account.id)
                 row["number"] = .decimal(posting.units.number)
-                row["position"] = .decimal(posting.units.number)
+                row["position"] = .position(Position(posting: posting))
                 row["currency"] = .string(posting.units.currency.id)
+                row["price"] = posting.price.map(RuntimeValue.amount) ?? .null
+                row["weight"] = .amount(posting.weight)
+
+                if let cost = posting.cost {
+                    row["cost_number"] = .decimal(cost.number)
+                    row["cost_currency"] = .string(cost.currency.id)
+                    row["cost_date"] = cost.date.map(RuntimeValue.date) ?? .null
+                    row["cost_label"] = cost.label.map(RuntimeValue.string) ?? .null
+                } else {
+                    row["cost_number"] = .null
+                    row["cost_currency"] = .null
+                    row["cost_date"] = .null
+                    row["cost_label"] = .string("")
+                }
+
+                _ = runningBalance.addAmount(posting.units, cost: posting.cost)
+                row["balance"] = .inventory(runningBalance)
 
                 row["flag"] = transaction.flag.map { .string(String($0)) } ?? .null
                 row["payee"] = transaction.payee.map(RuntimeValue.string) ?? .null

@@ -1,8 +1,12 @@
 import Foundation
+import BeancountSwift
 
 public enum RuntimeValue: Hashable, Sendable {
     case int(Int)
     case decimal(Decimal)
+    case amount(Amount)
+    case position(Position)
+    case inventory(Inventory)
     case string(String)
     case bool(Bool)
     case date(Date)
@@ -30,15 +34,22 @@ extension QueryTableProvider {
 
 public struct QueryContext: Sendable {
     public var tables: [String: [QueryRow]]
+    public var priceMap: PriceMap?
     private var providers: [String: any QueryTableProvider]
 
-    public init(tables: [String: [QueryRow]] = [:]) {
+    public init(tables: [String: [QueryRow]] = [:], priceMap: PriceMap? = nil) {
         self.tables = tables
+        self.priceMap = priceMap
         self.providers = [:]
     }
 
-    init(tables: [String: [QueryRow]] = [:], providers: [String: any QueryTableProvider]) {
+    init(
+        tables: [String: [QueryRow]] = [:],
+        providers: [String: any QueryTableProvider],
+        priceMap: PriceMap? = nil
+    ) {
         self.tables = tables
+        self.priceMap = priceMap
         self.providers = providers
     }
 
