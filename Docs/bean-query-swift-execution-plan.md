@@ -7,11 +7,14 @@
 - 能在 `BeancountSwift` 的账本数据上执行查询并返回结构化结果（列定义 + 行数据）。
 - 解析层使用 ANTLR（Swift target）实现，替代 TatSu。
 - 尽量对齐 Python `beanquery` 的行为（语法、类型规则、聚合规则、错误语义）。
+- 首版语句范围：`SELECT` 与 `BALANCES`。
+- 对外主入口：一步式 `run(query)`。
 
 ### 1.2 非目标（首版）
 - 不优先实现 shell/CLI 渲染（只做库 API）。
 - 不优先实现全部数据源（CSV/memory 等），先聚焦 Beancount 数据源。
 - 不优先做 SQL 方言扩展（先兼容 BQL 现有行为）。
+- 首版不实现 `JOURNAL/PRINT/CREATE TABLE/INSERT`，但保留可扩展设计。
 
 ## 2. 总体架构
 
@@ -110,9 +113,10 @@ Sources/BeanQuerySwift/
 - 从 `beanquery/parser/bql.ebnf` 迁移到 `BQLLexer.g4` + `BQLParser.g4`。
 - 先覆盖核心语句：
   - `SELECT ... FROM ... WHERE ... GROUP BY ... ORDER BY ... LIMIT ...`
+  - `BALANCES ...`
   - 表达式优先级（OR/AND/NOT/comparison/sum/term/unary/atom）。
 - 实现大小写不敏感关键字策略（统一词法规则）。
-- 处理注释/分号策略（见第 10 节待确认问题）。
+- 注释/分号策略与 Python BQL 保持一致（含 `;` 行注释行为）。
 - 实现 parse 错误包装：`line/column/token/range`。
 
 ### 交付
@@ -121,6 +125,7 @@ Sources/BeanQuerySwift/
 
 ### 验收
 - `SELECT`、表达式优先级、函数调用、placeholder、字面量解析通过测试。
+- `BALANCES` 解析通过测试。
 
 ---
 
@@ -128,7 +133,8 @@ Sources/BeanQuerySwift/
 
 ### 任务
 - 对齐 Python `ast.py` 建立 Swift AST：
-  - 语句节点：`Select/Balances/Journal/Print/CreateTable/Insert`
+  - 一阶段语句节点：`Select/Balances`
+  - 预留扩展语句节点：`Journal/Print/CreateTable/Insert`（可先定义占位或扩展点）
   - 表达式节点：`Column/Function/Constant/Placeholder/...`
   - 运算节点：`And/Or/Not/Equal/.../Between/...`
 - AST 节点携带 `SourceRange`（用于错误提示）。
@@ -176,6 +182,7 @@ Sources/BeanQuerySwift/
   - aggregate of aggregate 检查
   - 非聚合列与 group_indexes 一致性检查
 - 支持隐式 GROUP BY（可配置开关，默认与 Python 一致启用）。
+- 支持 `BALANCES` 到 `SELECT` 的编译期重写（首版必做）。
 
 ### 交付
 - `EvalQuery` compiled plan。
@@ -229,10 +236,12 @@ Sources/BeanQuerySwift/
 
 ## M7. BQL 语法糖与扩展语句（3~5 天）
 
+> 二阶段里程碑（非首版）
+
 ### 任务
-- 实现 `BALANCES/JOURNAL/PRINT` 到 `SELECT` 的编译期重写（desugar）。
+- 实现 `JOURNAL/PRINT` 到 `SELECT` 的编译期重写（desugar）。
 - 实现 `PIVOT BY`。
-- 评估并实现 `CREATE TABLE / INSERT`（如首版需要）。
+- 评估并实现 `CREATE TABLE / INSERT`。
 - 补齐特殊函数重写：
   - `row(*)`, `coalesce()`, `meta()`, `entry_meta()`, `any_meta()`, `has_account()`
 
@@ -288,7 +297,8 @@ public final class BeanQueryEngine {
 ## 6. 测试计划
 
 ### 6.1 Parser 测试
-- 语句覆盖：`SELECT/BALANCES/JOURNAL/PRINT/CREATE/INSERT`
+- 一阶段语句覆盖：`SELECT/BALANCES`
+- 二阶段语句覆盖：`JOURNAL/PRINT/CREATE/INSERT`
 - 表达式覆盖：优先级、结合性、`IN/BETWEEN/IS NULL/regex`。
 - 错误覆盖：非法 token、缺失子句、括号不匹配。
 
@@ -318,31 +328,31 @@ public final class BeanQueryEngine {
 
 1. M0 + M1：先把 ANTLR 解析链路跑通。
 2. M2 + M4（并行一部分）：AST 与 SELECT 编译主干。
-3. M5：执行器跑通基础查询。
-4. M6：接入 `BeancountSwift` 的 `postings/entries`。
-5. M7 + M8：补齐语法糖、兼容性与性能。
+3. M5：执行器跑通 `SELECT + BALANCES`。
+4. M6：接入 `BeancountSwift` 的 `postings/entries`（默认表 `postings`）。
+5. M7 + M8：补齐后续语法糖、兼容性与性能。
 
 ## 9. 预计工期（首版）
 
-- MVP（可查询真实 ledger，支持 SELECT + 聚合 + 分组 + 排序）：约 3~4 周。
-- 接近 Python 行为（含 BALANCES/JOURNAL/PRINT/PIVOT 和更多函数）：约 5~7 周。
+- MVP（可查询真实 ledger，支持 `SELECT + BALANCES` + 聚合 + 分组 + 排序）：约 3~4 周。
+- 接近 Python 行为（后续含 `JOURNAL/PRINT/PIVOT` 和更多函数）：约 5~7 周。
 
-## 10. 待你确认的问题（开始 M1 前建议定稿）
+## 10. 已确认决策（2026-02-23）
 
 1. 首版功能范围：
-- 仅 `SELECT` 先上线，还是必须同时包含 `BALANCES/JOURNAL/PRINT`？
+- 一阶段支持 `SELECT` 和 `BALANCES`，其他语句后置。
 
 2. 注释/分号策略：
-- 是否严格兼容 Python 版的 `;` 行注释（会与语句末分号产生歧义），还是改为 `--` 行注释并保留 `;` 作为终止符？
+- 与 Python BQL 行为对齐（含分号相关注释语义）。
 
 3. 兼容目标：
-- 以“行为接近”为目标，还是要尽量逐条对齐 Python `beanquery`（包含边界行为）？
+- 尽可能对齐 Python `beanquery`（包含边界行为）。
 
 4. `CREATE TABLE/INSERT`：
-- 是否纳入首版里程碑，还是放到第二阶段？
+- 一阶段仅做查询能力；设计需预留后续扩展空间。
 
 5. 默认表策略：
-- 是否与 Python 一致，`beancount` 数据源默认表设置为 `postings`？
+- 与 Python 一致，默认表为 `postings`。
 
 6. 对外 API 形态：
-- 你更偏好 `run(query)` 一步接口，还是保留 `parse -> compile -> execute` 三段式 API？
+- 对外优先一步式接口 `run(query)`。
