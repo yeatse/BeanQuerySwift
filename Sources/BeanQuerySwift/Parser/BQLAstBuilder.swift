@@ -26,7 +26,8 @@ struct BQLAstBuilder {
             where: try buildWhere(ctx.whereClause()),
             groupBy: try buildGroupBy(ctx.groupByClause()),
             orderBy: try buildOrderBy(ctx.orderByClause()),
-            limit: try buildLimit(ctx.limitClause())
+            limit: try buildLimit(ctx.limitClause()),
+            sourceRange: sourceRange(ctx)
         )
     }
 
@@ -36,7 +37,8 @@ struct BQLAstBuilder {
             from: try ctx.balancesFromClause().map { fromClause in
                 try buildFromExpr(require(fromClause.fromExpr(), "missing from expression"))
             },
-            where: try buildWhere(ctx.whereClause())
+            where: try buildWhere(ctx.whereClause()),
+            sourceRange: sourceRange(ctx)
         )
     }
 
@@ -48,7 +50,8 @@ struct BQLAstBuilder {
         let values = try ctx.target().map { target in
             try BQLTarget(
                 expression: buildExpression(require(target.expression(), "missing target expression")),
-                alias: try target.identifier().map(buildIdentifier)
+                alias: try target.identifier().map(buildIdentifier),
+                sourceRange: sourceRange(target)
             )
         }
 
@@ -123,7 +126,8 @@ struct BQLAstBuilder {
             expression: expression,
             open: open,
             close: close,
-            clear: ctx.clearClause() != nil || (ctx.CLEAR() != nil && expression == nil && open == nil && close == nil)
+            clear: ctx.clearClause() != nil || (ctx.CLEAR() != nil && expression == nil && open == nil && close == nil),
+            sourceRange: sourceRange(ctx)
         )
     }
 
@@ -144,7 +148,7 @@ struct BQLAstBuilder {
 
         let having = try ctx.expression().map(buildExpression)
 
-        return BQLGroupByClause(items: items, having: having)
+        return BQLGroupByClause(items: items, having: having, sourceRange: sourceRange(ctx))
     }
 
     private static func buildOrderBy(_ ctx: BQLParser.OrderByClauseContext?) throws -> [BQLOrderByItem]? {
@@ -165,7 +169,7 @@ struct BQLAstBuilder {
                 ordering = .ascending
             }
 
-            return BQLOrderByItem(value: value, ordering: ordering)
+            return BQLOrderByItem(value: value, ordering: ordering, sourceRange: sourceRange(item))
         }
     }
 
@@ -486,6 +490,21 @@ struct BQLAstBuilder {
             throw BQLASTBuildError(message)
         }
         return value
+    }
+
+    private static func sourceRange(_ ctx: ParserRuleContext?) -> BQLSourceRange? {
+        guard let ctx else { return nil }
+        return sourceRange(ctx.getStart(), ctx.getStop())
+    }
+
+    private static func sourceRange(_ start: Token?, _ stop: Token?) -> BQLSourceRange? {
+        guard let start, let stop else { return nil }
+        let startIndex = start.getStartIndex()
+        let stopIndex = stop.getStopIndex()
+        guard startIndex >= 0, stopIndex >= startIndex else {
+            return nil
+        }
+        return BQLSourceRange(start: startIndex, end: stopIndex)
     }
 
     private static func tokenText(_ token: Token?, _ message: String) throws -> String {

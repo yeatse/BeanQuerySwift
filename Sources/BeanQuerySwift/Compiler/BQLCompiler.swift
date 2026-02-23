@@ -6,27 +6,41 @@ struct BQLCompiler {
     ]
 
     let options: BQLCompilerOptions
+    private let typeChecker = ExpressionTypeChecker()
 
     init(options: BQLCompilerOptions = .init()) {
         self.options = options
     }
 
-    func compile(_ statement: BQLStatement, parameters: BQLParameters? = nil) throws -> EvalQuery {
+    func compile(
+        _ statement: BQLStatement,
+        parameters: BQLParameters? = nil,
+        context: QueryContext? = nil
+    ) throws -> EvalQuery {
         let boundStatement = try bindPlaceholders(in: statement, parameters: parameters)
 
         switch boundStatement {
         case .select(let select):
-            return try compileSelect(select)
+            return try compileSelect(select, context: context)
         case .balances(let balances):
-            return try compileSelect(transformBalances(balances))
+            return try compileSelect(transformBalances(balances), context: context)
         }
     }
 
-    private func compileSelect(_ select: BQLSelectStatement) throws -> EvalQuery {
-        let from = try compileFrom(select.from)
-        var targets = try compileTargets(select.targets)
+    private func compileSelect(
+        _ select: BQLSelectStatement,
+        context: QueryContext?
+    ) throws -> EvalQuery {
+        let from = try compileFrom(select.from, context: context)
+        let source = EvalSource(table: from.table, qualifiers: from.qualifiers)
+        var targets = try compileTargets(select.targets, source: source, context: context)
 
-        let filter = combineWithAnd(from.filter, select.where)
+        let whereExpression = try select.where.map(typeChecker.validateAndFold)
+        if let whereExpression, containsAggregate(whereExpression) {
+            throw BQLCompileError.aggregatesNotAllowedInWhere
+        }
+
+        let filter = combineWithAnd(from.filter, whereExpression)
 
         let groupResult = try compileGroupBy(select.groupBy, existingTargets: targets)
         targets.append(contentsOf: groupResult.newTargets)
@@ -48,7 +62,7 @@ struct BQLCompiler {
         }
 
         return EvalQuery(
-            source: EvalSource(table: from.table, qualifiers: from.qualifiers),
+            source: source,
             targets: targets,
             filter: filter,
             groupIndexes: groupResult.groupIndexes,
@@ -447,7 +461,10 @@ struct BQLCompiler {
         }
     }
 
-    private func compileFrom(_ from: BQLFromClause?) throws -> (
+    private func compileFrom(
+        _ from: BQLFromClause?,
+        context: QueryContext?
+    ) throws -> (
         table: EvalTableReference,
         qualifiers: EvalQualifiers?,
         filter: BQLExpression?
@@ -467,7 +484,7 @@ struct BQLCompiler {
 
         case .subselect(let subquery):
             return (
-                .subquery(try compileSelect(subquery)),
+                .subquery(try compileSelect(subquery, context: context)),
                 nil,
                 nil
             )
@@ -485,22 +502,40 @@ struct BQLCompiler {
                 close: expression.close,
                 clear: expression.clear
             )
+
+            let normalizedFilter = try expression.expression.map(typeChecker.validateAndFold)
+            if let normalizedFilter, containsAggregate(normalizedFilter) {
+                throw BQLCompileError.aggregatesNotAllowedInFrom
+            }
+
             return (
                 .named(options.defaultTableName),
                 qualifiers,
-                expression.expression
+                normalizedFilter
             )
         }
     }
 
-    private func compileTargets(_ targets: BQLTargetList) throws -> [EvalTarget] {
+    private func compileTargets(
+        _ targets: BQLTargetList,
+        source: EvalSource,
+        context: QueryContext?
+    ) throws -> [EvalTarget] {
         switch targets {
         case .asterisk:
+            if let columns = try wildcardColumns(source: source, context: context),
+               !columns.isEmpty
+            {
+                return columns.map { column in
+                    EvalTarget(expression: .column(column), name: column, isAggregate: false)
+                }
+            }
+
             return [EvalTarget(expression: .asterisk, name: "*", isAggregate: false)]
 
         case .values(let values):
             return try values.map { target in
-                let expression = target.expression
+                let expression = try typeChecker.validateAndFold(target.expression)
                 let analysis = analyzeAggregateUsage(expression)
 
                 if analysis.hasAggregate && analysis.hasNonAggregateColumn {
@@ -517,6 +552,25 @@ struct BQLCompiler {
                     isAggregate: analysis.hasAggregate
                 )
             }
+        }
+    }
+
+    private func wildcardColumns(
+        source: EvalSource,
+        context: QueryContext?
+    ) throws -> [String]? {
+        switch source.table {
+        case .named(let name):
+            return try context?.wildcardColumns(table: name, qualifiers: source.qualifiers)
+
+        case .hash(let tableName):
+            guard let tableName else {
+                return []
+            }
+            return try context?.wildcardColumns(table: tableName, qualifiers: source.qualifiers)
+
+        case .subquery(let query):
+            return query.visibleTargets.compactMap(\.name)
         }
     }
 
@@ -546,20 +600,21 @@ struct BQLCompiler {
                     index = resolved
 
                 case .expression(let expression):
-                    if containsAggregate(expression) {
+                    let normalizedExpression = try typeChecker.validateAndFold(expression)
+                    if containsAggregate(normalizedExpression) {
                         throw BQLCompileError.groupByContainsAggregate
                     }
 
-                    if case .column(let name) = expression, let resolved = targetNames[name] {
+                    if case .column(let name) = normalizedExpression, let resolved = targetNames[name] {
                         index = resolved
-                    } else if let resolved = expressions.firstIndex(of: expression) {
+                    } else if let resolved = expressions.firstIndex(of: normalizedExpression) {
                         index = resolved
                     } else {
                         index = newTargets.count
                         newTargets.append(
-                            EvalTarget(expression: expression, name: nil, isAggregate: false)
+                            EvalTarget(expression: normalizedExpression, name: nil, isAggregate: false)
                         )
-                        expressions.append(expression)
+                        expressions.append(normalizedExpression)
                     }
                 }
 
@@ -571,13 +626,14 @@ struct BQLCompiler {
 
             var havingIndex: Int?
             if let having = groupBy.having {
-                guard containsAggregate(having) else {
+                let normalizedHaving = try typeChecker.validateAndFold(having)
+                guard containsAggregate(normalizedHaving) else {
                     throw BQLCompileError.havingMustBeAggregate
                 }
 
                 havingIndex = newTargets.count
                 newTargets.append(
-                    EvalTarget(expression: having, name: nil, isAggregate: true)
+                    EvalTarget(expression: normalizedHaving, name: nil, isAggregate: true)
                 )
             }
 
@@ -635,20 +691,21 @@ struct BQLCompiler {
                 index = visibleIndexes[resolved]
 
             case .expression(let expression):
-                if case .column(let name) = expression, let resolved = targetNames[name] {
+                let normalizedExpression = try typeChecker.validateAndFold(expression)
+                if case .column(let name) = normalizedExpression, let resolved = targetNames[name] {
                     index = resolved
-                } else if let resolved = expressions.firstIndex(of: expression) {
+                } else if let resolved = expressions.firstIndex(of: normalizedExpression) {
                     index = resolved
                 } else {
                     index = targets.count
                     targets.append(
                         EvalTarget(
-                            expression: expression,
+                            expression: normalizedExpression,
                             name: nil,
-                            isAggregate: containsAggregate(expression)
+                            isAggregate: containsAggregate(normalizedExpression)
                         )
                     )
-                    expressions.append(expression)
+                    expressions.append(normalizedExpression)
                 }
             }
 

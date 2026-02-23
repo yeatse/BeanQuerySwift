@@ -5,6 +5,52 @@ import Testing
 @Suite(.serialized)
 struct BQLCompilerTests {
     private let engine = BeanQueryEngine()
+    private static let compileableQueries: [String] = [
+        "SELECT account FROM #postings",
+        "SELECT account, number FROM #postings",
+        "SELECT DISTINCT account FROM #postings",
+        "SELECT account FROM #",
+        "SELECT account FROM postings",
+        "SELECT account FROM #postings WHERE year = 2024",
+        "SELECT account FROM #postings WHERE account ~ 'Assets:.*'",
+        "SELECT account FROM #postings WHERE account !~ 'Income:.*'",
+        "SELECT account FROM #postings WHERE payee IS NULL",
+        "SELECT account FROM #postings WHERE payee IS NOT NULL",
+        "SELECT account, number + 1 FROM #postings",
+        "SELECT account, number - 1 FROM #postings",
+        "SELECT account, number * 2 FROM #postings",
+        "SELECT account, number / 2 FROM #postings",
+        "SELECT account, number % 2 FROM #postings",
+        "SELECT account, -number FROM #postings",
+        "SELECT account, sum(number) FROM #postings GROUP BY account",
+        "SELECT account, sum(number) FROM #postings GROUP BY 1",
+        "SELECT account, sum(number) FROM #postings GROUP BY account HAVING sum(number) > 0",
+        "SELECT account, sum(number) AS total FROM #postings GROUP BY account ORDER BY total DESC",
+        "SELECT account, number FROM #postings ORDER BY number DESC",
+        "SELECT account, number FROM #postings ORDER BY 2 ASC",
+        "SELECT account, number FROM #postings LIMIT 10",
+        "SELECT account FROM OPEN ON 2024-01-01",
+        "SELECT account FROM CLOSE",
+        "SELECT account FROM CLOSE ON 2024-12-31",
+        "SELECT account FROM CLEAR",
+        "SELECT account FROM account ~ 'Assets:.*' OPEN ON 2024-01-01 CLOSE ON 2024-12-31 CLEAR",
+        "SELECT account FROM (SELECT account FROM #postings)",
+        "SELECT * FROM #postings",
+        "SELECT 1 + 2 FROM #",
+        "SELECT true AND false FROM #",
+        "SELECT account_sortkey(account) FROM #postings",
+        "BALANCES",
+        "BALANCES WHERE account ~ 'Assets:.*'",
+        "BALANCES AT units",
+        "BALANCES AT units FROM CLOSE",
+        "BALANCES AT units FROM CLOSE ON 2024-12-31 WHERE year = 2024",
+    ]
+
+    @Test(arguments: compileableQueries)
+    func compileManyValidQueries(_ query: String) throws {
+        let compiled = try engine.run(query)
+        #expect(!compiled.targets.isEmpty)
+    }
 
     @Test func compileSelectImplicitGroupBy() throws {
         let compiled = try engine.run("SELECT account, sum(number) FROM #postings")
@@ -168,5 +214,61 @@ struct BQLCompilerTests {
         } catch let error as BQLCompileError {
             #expect(error == .mixedPlaceholderStyles)
         }
+    }
+
+    @Test func compileAggregateInWhereFails() throws {
+        do {
+            _ = try engine.run("SELECT account FROM #postings WHERE sum(number) > 0")
+            Issue.record("expected compile failure")
+        } catch let error as BQLCompileError {
+            #expect(error == .aggregatesNotAllowedInWhere)
+        }
+    }
+
+    @Test func compileAggregateInFromFails() throws {
+        do {
+            _ = try engine.run("SELECT account FROM sum(number)")
+            Issue.record("expected compile failure")
+        } catch let error as BQLCompileError {
+            #expect(error == .aggregatesNotAllowedInFrom)
+        }
+    }
+
+    @Test func compileInvalidFunctionSignatureFails() throws {
+        do {
+            _ = try engine.run("SELECT account_sortkey(1) FROM #postings")
+            Issue.record("expected compile failure")
+        } catch let error as BQLCompileError {
+            #expect(
+                error == .invalidFunctionSignature(
+                    name: "account_sortkey",
+                    argTypes: [.int]
+                )
+            )
+        }
+    }
+
+    @Test func compileInvalidBinaryOperatorFails() throws {
+        do {
+            _ = try engine.run("SELECT 'a' - 'b' FROM #postings")
+            Issue.record("expected compile failure")
+        } catch let error as BQLCompileError {
+            #expect(
+                error == .invalidBinaryOperator(
+                    op: .sub,
+                    left: .string,
+                    right: .string
+                )
+            )
+        }
+    }
+
+    @Test func compileConstantExpressionFolding() throws {
+        let compiled = try engine.run("SELECT 1 + 2 AS total FROM #")
+        guard case .constant(.integer(let value)) = compiled.targets[0].expression else {
+            Issue.record("expected folded integer constant")
+            return
+        }
+        #expect(value == 3)
     }
 }

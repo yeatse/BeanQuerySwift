@@ -108,4 +108,17 @@ struct BQLExecutionTests {
             [.string("Assets:Cash"), .int(5)],
         ])
     }
+
+    @Test func runSelectAsteriskExpandsColumns() throws {
+        let result = try engine.run(
+            "SELECT * FROM #postings WHERE account = 'Assets:Cash' ORDER BY number DESC",
+            in: context
+        )
+
+        #expect(result.columns == ["account", "number", "position", "year"])
+        #expect(result.rows == [
+            [.string("Assets:Cash"), .int(10), .int(10), .int(2024)],
+            [.string("Assets:Cash"), .int(5), .int(5), .int(2024)],
+        ])
+    }
 }

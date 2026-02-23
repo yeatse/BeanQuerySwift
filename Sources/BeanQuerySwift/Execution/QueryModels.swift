@@ -14,6 +14,18 @@ public typealias QueryRow = [String: RuntimeValue]
 
 protocol QueryTableProvider: Sendable {
     func rows(for qualifiers: EvalQualifiers?) throws -> [QueryRow]
+    func wildcardColumns(for qualifiers: EvalQualifiers?) throws -> [String]
+}
+
+extension QueryTableProvider {
+    func wildcardColumns(for qualifiers: EvalQualifiers?) throws -> [String] {
+        let rows = try rows(for: qualifiers)
+        return rows
+            .reduce(into: Set<String>()) { partialResult, row in
+                partialResult.formUnion(row.keys)
+            }
+            .sorted()
+    }
 }
 
 public struct QueryContext: Sendable {
@@ -32,6 +44,21 @@ public struct QueryContext: Sendable {
 
     func provider(named name: String) -> (any QueryTableProvider)? {
         providers[name]
+    }
+
+    func wildcardColumns(table: String, qualifiers: EvalQualifiers?) throws -> [String]? {
+        if let provider = providers[table] {
+            return try provider.wildcardColumns(for: qualifiers)
+        }
+
+        guard let rows = tables[table] else {
+            return nil
+        }
+        return rows
+            .reduce(into: Set<String>()) { partialResult, row in
+                partialResult.formUnion(row.keys)
+            }
+            .sorted()
     }
 }
 

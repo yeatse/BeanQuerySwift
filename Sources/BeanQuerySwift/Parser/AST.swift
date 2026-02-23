@@ -1,5 +1,10 @@
 import Foundation
 
+struct BQLSourceRange: Equatable, Sendable {
+    var start: Int
+    var end: Int
+}
+
 indirect enum BQLStatement: Equatable {
     case select(BQLSelectStatement)
     case balances(BQLBalancesStatement)
@@ -13,12 +18,14 @@ struct BQLSelectStatement: Equatable {
     var groupBy: BQLGroupByClause?
     var orderBy: [BQLOrderByItem]?
     var limit: Int?
+    var sourceRange: BQLSourceRange? = nil
 }
 
 struct BQLBalancesStatement: Equatable {
     var summaryFunction: String?
     var from: BQLFromExpression?
     var `where`: BQLExpression?
+    var sourceRange: BQLSourceRange? = nil
 }
 
 enum BQLTargetList: Equatable {
@@ -29,6 +36,7 @@ enum BQLTargetList: Equatable {
 struct BQLTarget: Equatable {
     var expression: BQLExpression
     var alias: String?
+    var sourceRange: BQLSourceRange? = nil
 }
 
 indirect enum BQLFromClause: Equatable {
@@ -47,6 +55,7 @@ struct BQLFromExpression: Equatable {
     var open: Date?
     var close: BQLCloseQualifier?
     var clear: Bool
+    var sourceRange: BQLSourceRange? = nil
 }
 
 enum BQLCloseQualifier: Equatable {
@@ -57,6 +66,7 @@ enum BQLCloseQualifier: Equatable {
 struct BQLGroupByClause: Equatable {
     var items: [BQLGroupByItem]
     var having: BQLExpression?
+    var sourceRange: BQLSourceRange? = nil
 }
 
 enum BQLGroupByItem: Equatable {
@@ -67,6 +77,7 @@ enum BQLGroupByItem: Equatable {
 struct BQLOrderByItem: Equatable {
     var value: BQLOrderByValue
     var ordering: BQLOrdering
+    var sourceRange: BQLSourceRange? = nil
 }
 
 enum BQLOrderByValue: Equatable {

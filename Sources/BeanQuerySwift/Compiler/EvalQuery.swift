@@ -72,6 +72,11 @@ enum BQLCompileError: Error, Equatable, CustomStringConvertible {
     case queryParameterMissing([String])
     case placeholderCountMismatch(expected: Int, actual: Int)
     case mixedPlaceholderStyles
+    case invalidFunctionSignature(name: String, argTypes: [BQLType])
+    case invalidUnaryOperator(op: BQLUnaryOperator, operand: BQLType)
+    case invalidBinaryOperator(op: BQLBinaryOperator, left: BQLType, right: BQLType)
+    case aggregatesNotAllowedInFrom
+    case aggregatesNotAllowedInWhere
     case mixedAggregatesAndNonAggregates
     case aggregatesOfAggregates
     case groupByContainsAggregate
@@ -100,6 +105,17 @@ enum BQLCompileError: Error, Equatable, CustomStringConvertible {
             return "the query has \(expected) placeholders but \(actual) parameters were passed"
         case .mixedPlaceholderStyles:
             return "positional and named parameters cannot be mixed"
+        case .invalidFunctionSignature(let name, let argTypes):
+            let rendered = argTypes.map(\.description).joined(separator: ", ")
+            return "invalid function signature: \(name)(\(rendered))"
+        case .invalidUnaryOperator(let op, let operand):
+            return "invalid unary operator: \(op) \(operand)"
+        case .invalidBinaryOperator(let op, let left, let right):
+            return "invalid binary operator: \(left) \(op) \(right)"
+        case .aggregatesNotAllowedInFrom:
+            return "aggregates are not allowed in FROM clause"
+        case .aggregatesNotAllowedInWhere:
+            return "aggregates are not allowed in WHERE clause"
         case .mixedAggregatesAndNonAggregates:
             return "mixed aggregates and non-aggregates are not allowed"
         case .aggregatesOfAggregates:

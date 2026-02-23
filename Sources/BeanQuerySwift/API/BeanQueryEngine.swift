@@ -21,8 +21,12 @@ public struct BeanQueryEngine {
         try BQLParserFacade.parseStatement(bql)
     }
 
-    func compile(_ bql: String, parameters: BQLParameters? = nil) throws -> EvalQuery {
-        try compiler.compile(parse(bql), parameters: parameters)
+    func compile(
+        _ bql: String,
+        parameters: BQLParameters? = nil,
+        context: QueryContext? = nil
+    ) throws -> EvalQuery {
+        try compiler.compile(parse(bql), parameters: parameters, context: context)
     }
 
     /// One-step compile entry point, useful for introspecting query plans.
@@ -35,11 +39,14 @@ public struct BeanQueryEngine {
     }
 
     public func run(_ bql: String, in context: QueryContext) throws -> QueryResult {
-        try executor.execute(compile(bql), context: context)
+        try executor.execute(compile(bql, context: context), context: context)
     }
 
     public func run(_ bql: String, parameters: BQLParameters, in context: QueryContext) throws -> QueryResult {
-        try executor.execute(compile(bql, parameters: parameters), context: context)
+        try executor.execute(
+            compile(bql, parameters: parameters, context: context),
+            context: context
+        )
     }
 
     public func run(_ bql: String, in ledger: ParsedLedger<Cost>) throws -> QueryResult {
