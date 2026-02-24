@@ -7,6 +7,7 @@ public enum RuntimeValue: Hashable, Sendable {
     case amount(Amount)
     case position(Position)
     case inventory(Inventory)
+    case dict([String: RuntimeValue])
     case string(String)
     case bool(Bool)
     case date(Date)

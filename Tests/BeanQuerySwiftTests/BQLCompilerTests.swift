@@ -38,9 +38,30 @@ struct BQLCompilerTests {
         "SELECT account FROM account ~ 'Assets:.*' OPEN ON 2024-01-01 CLOSE ON 2024-12-31 CLEAR",
         "SELECT account FROM (SELECT account FROM #postings)",
         "SELECT * FROM #postings",
+        "SELECT root(account) FROM #postings",
+        "SELECT root(account, 2) FROM #postings",
+        "SELECT parent(account) FROM #postings",
+        "SELECT leaf(account) FROM #postings",
+        "SELECT grep('Assets:.*', account) FROM #postings",
+        "SELECT grepn('(Assets):(.*)', account, 2) FROM #postings",
+        "SELECT subst('Assets', 'A', account) FROM #postings",
+        "SELECT upper(account) FROM #postings",
+        "SELECT lower(account) FROM #postings",
+        "SELECT open_date(account) FROM #postings",
+        "SELECT close_date(account) FROM #postings",
+        "SELECT open_meta(account, 'key') FROM #postings",
+        "SELECT has_account('Assets:Cash') FROM #postings",
         "SELECT 1 + 2 FROM #",
         "SELECT true AND false FROM #",
         "SELECT account_sortkey(account) FROM #postings",
+        "SELECT convert(position, 'USD') FROM #postings",
+        "SELECT getprice('VTI', 'USD') FROM #",
+        "SELECT only('USD', cost(sum(position))) FROM #postings",
+        "SELECT empty(sum(position)) FROM #postings",
+        "SELECT filter_currency(position, 'USD') FROM #postings",
+        "SELECT possign(number, account) FROM #postings",
+        "SELECT number(convert(position, 'USD')) FROM #postings",
+        "SELECT currency(convert(position, 'USD')) FROM #postings",
         "BALANCES",
         "BALANCES WHERE account ~ 'Assets:.*'",
         "BALANCES AT units",
@@ -354,5 +375,12 @@ struct BQLCompilerTests {
             return
         }
         #expect(value == 3)
+
+        let foldedRoot = try engine.run("SELECT root('Assets:Cash', 1) AS root FROM #")
+        guard case .constant(.string(let rootValue)) = foldedRoot.targets[0].expression else {
+            Issue.record("expected folded string constant")
+            return
+        }
+        #expect(rootValue == "Assets")
     }
 }

@@ -468,128 +468,12 @@ struct QueryExecutor {
         }
 
         let values = try args.map { try evaluateExpression($0, row: row, group: group, context: context, state: state) }
-
-        switch normalized {
-        case "units":
-            guard values.count == 1 else {
-                throw BQLExecutionError.unsupportedFunction(name)
-            }
-            return try units(values[0])
-        case "cost":
-            guard values.count == 1 else {
-                throw BQLExecutionError.unsupportedFunction(name)
-            }
-            return try cost(values[0])
-        case "weight":
-            guard values.count == 1 else {
-                throw BQLExecutionError.unsupportedFunction(name)
-            }
-            return try weight(values[0])
-        case "value":
-            guard values.count == 1 || values.count == 2 else {
-                throw BQLExecutionError.unsupportedFunction(name)
-            }
-
-            let date: Date?
-            if values.count == 2 {
-                guard case .date(let suppliedDate) = values[1] else {
-                    throw BQLExecutionError.invalidType
-                }
-                date = suppliedDate
-            } else {
-                date = nil
-            }
-            return try value(values[0], date: date, context: context)
-        case "maxwidth":
-            guard values.count == 2 else {
-                throw BQLExecutionError.unsupportedFunction(name)
-            }
-
-            guard case .string(let text) = values[0], let width = asInt(values[1]) else {
-                if values[0] == .null {
-                    return .null
-                }
-                throw BQLExecutionError.invalidType
-            }
-            return .string(String(text.prefix(max(width, 0))))
-        case "account_sortkey":
-            return values.first ?? .null
-        default:
-            throw BQLExecutionError.unsupportedFunction(name)
-        }
-    }
-
-    private func units(_ value: RuntimeValue) throws -> RuntimeValue {
-        switch value {
-        case .int, .decimal, .amount:
-            return value
-        case .position(let position):
-            return .amount(position.units)
-        case .inventory(let inventory):
-            return .inventory(inventory.reduce { $0.units })
-        case .null:
-            return .null
-        default:
-            throw BQLExecutionError.invalidType
-        }
-    }
-
-    private func cost(_ value: RuntimeValue) throws -> RuntimeValue {
-        switch value {
-        case .int, .decimal, .amount:
-            return value
-        case .position(let position):
-            return .amount(position.totalCost)
-        case .inventory(let inventory):
-            return .inventory(inventory.reduce { $0.totalCost })
-        case .null:
-            return .null
-        default:
-            throw BQLExecutionError.invalidType
-        }
-    }
-
-    private func weight(_ value: RuntimeValue) throws -> RuntimeValue {
-        switch value {
-        case .int, .decimal, .amount:
-            return value
-        case .position(let position):
-            return .amount(position.weight)
-        case .inventory(let inventory):
-            return .inventory(inventory.reduce { $0.weight })
-        case .null:
-            return .null
-        default:
-            throw BQLExecutionError.invalidType
-        }
-    }
-
-    private func value(
-        _ input: RuntimeValue,
-        date: Date?,
-        context: QueryContext
-    ) throws -> RuntimeValue {
-        switch input {
-        case .int, .decimal, .amount:
-            return input
-        case .position(let position):
-            guard let priceMap = context.priceMap else {
-                return .amount(position.units)
-            }
-            return .amount(position.marketValue(from: priceMap, date: date))
-
-        case .inventory(let inventory):
-            guard let priceMap = context.priceMap else {
-                return .inventory(inventory.reduce { $0.units })
-            }
-            return .inventory(inventory.reduce { $0.marketValue(from: priceMap, date: date) })
-
-        case .null:
-            return .null
-
-        default:
-            throw BQLExecutionError.invalidType
-        }
+        return try BuiltinFunctionEvaluator(context: context).evaluate(
+            name: name,
+            normalizedName: normalized,
+            arguments: values,
+            row: row
+        )
     }
 
     private func evaluateAggregateFunction(
@@ -928,6 +812,13 @@ struct QueryExecutor {
             return position.description
         case .inventory(let inventory):
             return inventory.description
+        case .dict(let dictionary):
+            let keys = dictionary.keys.sorted()
+            let parts = keys.map { key in
+                let value = dictionary[key] ?? .null
+                return "\(key):\(renderValue(value))"
+            }
+            return "{\(parts.joined(separator: ","))}"
         case .string(let text):
             return text
         case .bool(let value):

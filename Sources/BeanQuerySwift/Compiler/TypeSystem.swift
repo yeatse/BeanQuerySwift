@@ -39,13 +39,59 @@ private struct FunctionRegistry {
         FunctionSignature(name: "last", arguments: [.object], result: .object),
         FunctionSignature(name: "min", arguments: [.object], result: .object),
         FunctionSignature(name: "max", arguments: [.object], result: .object),
+        FunctionSignature(name: "abs", arguments: [.object], result: .object),
         FunctionSignature(name: "units", arguments: [.object], result: .object),
         FunctionSignature(name: "cost", arguments: [.object], result: .object),
         FunctionSignature(name: "weight", arguments: [.object], result: .object),
         FunctionSignature(name: "value", arguments: [.object], result: .object),
         FunctionSignature(name: "value", arguments: [.object, .date], result: .object),
+        FunctionSignature(name: "convert", arguments: [.object, .string], result: .object),
+        FunctionSignature(name: "convert", arguments: [.object, .string, .date], result: .object),
+        FunctionSignature(name: "getprice", arguments: [.string, .string], result: .decimal),
+        FunctionSignature(name: "getprice", arguments: [.string, .string, .date], result: .decimal),
+        FunctionSignature(name: "number", arguments: [.object], result: .decimal),
+        FunctionSignature(name: "currency", arguments: [.object], result: .string),
+        FunctionSignature(name: "commodity", arguments: [.object], result: .string),
+        FunctionSignature(name: "only", arguments: [.string, .object], result: .object),
+        FunctionSignature(name: "empty", arguments: [.object], result: .bool),
+        FunctionSignature(name: "filter_currency", arguments: [.object, .string], result: .object),
+        FunctionSignature(name: "possign", arguments: [.object, .string], result: .object),
         FunctionSignature(name: "maxwidth", arguments: [.string, .int], result: .string),
+        FunctionSignature(name: "root", arguments: [.string], result: .string),
+        FunctionSignature(name: "root", arguments: [.string, .int], result: .string),
+        FunctionSignature(name: "parent", arguments: [.string], result: .string),
+        FunctionSignature(name: "leaf", arguments: [.string], result: .string),
+        FunctionSignature(name: "grep", arguments: [.string, .string], result: .string),
+        FunctionSignature(name: "grepn", arguments: [.string, .string, .int], result: .string),
+        FunctionSignature(name: "subst", arguments: [.string, .string, .string], result: .string),
+        FunctionSignature(name: "upper", arguments: [.string], result: .string),
+        FunctionSignature(name: "lower", arguments: [.string], result: .string),
+        FunctionSignature(name: "open_date", arguments: [.string], result: .date),
+        FunctionSignature(name: "close_date", arguments: [.string], result: .date),
+        FunctionSignature(name: "open_meta", arguments: [.string], result: .object),
+        FunctionSignature(name: "open_meta", arguments: [.string, .string], result: .object),
         FunctionSignature(name: "account_sortkey", arguments: [.string], result: .string),
+        FunctionSignature(name: "has_account", arguments: [.string], result: .bool),
+        FunctionSignature(name: "date", arguments: [.date], result: .date),
+        FunctionSignature(name: "date", arguments: [.string], result: .date),
+        FunctionSignature(name: "date", arguments: [.object], result: .date),
+        FunctionSignature(name: "date", arguments: [.int, .int, .int], result: .date),
+        FunctionSignature(name: "year", arguments: [.date], result: .int),
+        FunctionSignature(name: "month", arguments: [.date], result: .int),
+        FunctionSignature(name: "day", arguments: [.date], result: .int),
+        FunctionSignature(name: "yearmonth", arguments: [.date], result: .date),
+        FunctionSignature(name: "quarter", arguments: [.date], result: .string),
+        FunctionSignature(name: "weekday", arguments: [.date], result: .string),
+        FunctionSignature(name: "today", arguments: [], result: .date),
+        FunctionSignature(name: "parse_date", arguments: [.string], result: .date),
+        FunctionSignature(name: "parse_date", arguments: [.string, .string], result: .date),
+        FunctionSignature(name: "date_diff", arguments: [.date, .date], result: .int),
+        FunctionSignature(name: "date_add", arguments: [.date, .int], result: .date),
+        FunctionSignature(name: "date_trunc", arguments: [.string, .date], result: .date),
+        FunctionSignature(name: "date_part", arguments: [.string, .date], result: .int),
+        FunctionSignature(name: "interval", arguments: [.string], result: .object),
+        FunctionSignature(name: "date_bin", arguments: [.object, .date, .date], result: .date),
+        FunctionSignature(name: "date_bin", arguments: [.string, .date, .date], result: .date),
     ]
 
     func lookup(name: String, arguments: [BQLType]) -> BQLType? {
@@ -405,8 +451,66 @@ struct ExpressionTypeChecker {
         guard args.count == expectedCount else { return nil }
 
         switch name.lowercased() {
-        case "units", "cost", "weight", "account_sortkey":
+        case "units", "cost", "weight":
             return args.first
+        case "account_sortkey":
+            guard args.count == 1, case .string(let account) = args[0] else {
+                return nil
+            }
+            let root = account.split(separator: ":").first.map(String.init) ?? account
+            let index: Int
+            switch root.lowercased() {
+            case "assets":
+                index = 0
+            case "liabilities":
+                index = 1
+            case "equity":
+                index = 2
+            case "income":
+                index = 3
+            case "expenses":
+                index = 4
+            default:
+                index = 5
+            }
+            return .string("\(index)-\(account)")
+        case "root":
+            guard case .string(let account) = args[0] else {
+                return nil
+            }
+            let components = account.split(separator: ":", omittingEmptySubsequences: false).map(String.init)
+            let count: Int
+            if args.count == 2 {
+                guard case .integer(let parsedCount) = args[1] else {
+                    return nil
+                }
+                count = parsedCount
+            } else {
+                count = 1
+            }
+            if count >= 0 {
+                return .string(components.prefix(count).joined(separator: ":"))
+            }
+            let suffixToDrop = min(-count, components.count)
+            return .string(components.dropLast(suffixToDrop).joined(separator: ":"))
+        case "parent":
+            guard args.count == 1, case .string(let account) = args[0] else {
+                return nil
+            }
+            if account.isEmpty {
+                return .null
+            }
+            var components = account.split(separator: ":", omittingEmptySubsequences: false).map(String.init)
+            _ = components.popLast()
+            return .string(components.joined(separator: ":"))
+        case "leaf":
+            guard args.count == 1, case .string(let account) = args[0] else {
+                return nil
+            }
+            if account.isEmpty {
+                return .null
+            }
+            return .string(account.split(separator: ":", omittingEmptySubsequences: false).last.map(String.init) ?? "")
         case "maxwidth":
             guard args.count == 2,
                   case .string(let text) = args[0],
@@ -416,6 +520,16 @@ struct ExpressionTypeChecker {
             }
             let clipped = String(text.prefix(max(width, 0)))
             return .string(clipped)
+        case "upper":
+            guard args.count == 1, case .string(let text) = args[0] else {
+                return nil
+            }
+            return .string(text.uppercased())
+        case "lower":
+            guard args.count == 1, case .string(let text) = args[0] else {
+                return nil
+            }
+            return .string(text.lowercased())
         default:
             return nil
         }

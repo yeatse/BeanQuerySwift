@@ -143,15 +143,20 @@ public enum BeancountQueryContextBuilder {
     fileprivate static func buildAccountsRows(directives: [Directive<Cost>]) -> [QueryRow] {
         var openByAccount: [String: Date] = [:]
         var closeByAccount: [String: Date] = [:]
+        var openMetaByAccount: [String: RuntimeValue] = [:]
 
         for directive in directives {
             switch directive.content {
             case .open(let open):
                 let account = open.account.id
                 if let existing = openByAccount[account] {
-                    openByAccount[account] = min(existing, directive.date)
+                    if directive.date < existing {
+                        openByAccount[account] = directive.date
+                        openMetaByAccount[account] = .dict(runtimeMetaDictionary(from: directive.meta))
+                    }
                 } else {
                     openByAccount[account] = directive.date
+                    openMetaByAccount[account] = .dict(runtimeMetaDictionary(from: directive.meta))
                 }
             case .close(let close):
                 let account = close.account.id
@@ -171,6 +176,7 @@ public enum BeancountQueryContextBuilder {
             row["account"] = .string(account)
             row["open_date"] = openByAccount[account].map(RuntimeValue.date) ?? .null
             row["close_date"] = closeByAccount[account].map(RuntimeValue.date) ?? .null
+            row["open_meta"] = openMetaByAccount[account] ?? .null
             row["type"] = .string(accountTypeName(account))
             return row
         }
@@ -196,6 +202,49 @@ public enum BeancountQueryContextBuilder {
     private static func accountTypeName(_ account: String) -> String {
         let root = account.split(separator: ":").first.map(String.init) ?? account
         return root.lowercased()
+    }
+
+    private static func runtimeMetaDictionary(from metadata: MetaData) -> [String: RuntimeValue] {
+        var result: [String: RuntimeValue] = [:]
+        for (key, value) in metadata {
+            result[key] = runtimeMetaValue(value)
+        }
+        return result
+    }
+
+    private static func runtimeMetaValue(_ value: MetaDataValue) -> RuntimeValue {
+        switch value {
+        case .string(let string):
+            return .string(string)
+        case .account(let account):
+            return .string(account.id)
+        case .currency(let currency):
+            return .string(currency.id)
+        case .date(let date):
+            return .date(date)
+        case .tag(let tag):
+            return .string(tag.id)
+        case .number(let number):
+            return exactInt(from: number).map(RuntimeValue.int) ?? .decimal(number)
+        case .bool(let bool):
+            return .bool(bool)
+        case .amount(let amount):
+            return .amount(amount)
+        case .range(let range):
+            return .string(String(describing: range))
+        }
+    }
+
+    private static func exactInt(from decimal: Decimal) -> Int? {
+        var value = decimal
+        var rounded = Decimal()
+        NSDecimalRound(&rounded, &value, 0, .plain)
+        guard rounded == decimal else {
+            return nil
+        }
+
+        let intValue = NSDecimalNumber(decimal: decimal).intValue
+        return Decimal(intValue) == decimal ? intValue : nil
     }
 }
 
