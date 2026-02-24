@@ -56,125 +56,7 @@ struct BuiltinFunctionEvaluator {
             }
             return try absolute(values[0])
 
-        case "units":
-            guard values.count == 1 else {
-                throw BQLExecutionError.unsupportedFunction(name)
-            }
-            return try units(values[0])
-
-        case "cost":
-            guard values.count == 1 else {
-                throw BQLExecutionError.unsupportedFunction(name)
-            }
-            return try cost(values[0])
-
-        case "weight":
-            guard values.count == 1 else {
-                throw BQLExecutionError.unsupportedFunction(name)
-            }
-            return try weight(values[0])
-
-        case "value":
-            guard values.count == 1 || values.count == 2 else {
-                throw BQLExecutionError.unsupportedFunction(name)
-            }
-
-            let date: Date?
-            if values.count == 2 {
-                guard case .date(let suppliedDate) = values[1] else {
-                    throw BQLExecutionError.invalidType
-                }
-                date = suppliedDate
-            } else {
-                date = nil
-            }
-            return try value(values[0], date: date)
-
-        case "convert":
-            guard values.count == 2 || values.count == 3 else {
-                throw BQLExecutionError.unsupportedFunction(name)
-            }
-            guard case .string(let targetCurrency) = values[1] else {
-                throw BQLExecutionError.invalidType
-            }
-
-            let date: Date?
-            if values.count == 3 {
-                guard case .date(let suppliedDate) = values[2] else {
-                    throw BQLExecutionError.invalidType
-                }
-                date = suppliedDate
-            } else {
-                date = nil
-            }
-            return try convert(values[0], targetCurrency: targetCurrency, date: date)
-
-        case "getprice":
-            guard values.count == 2 || values.count == 3 else {
-                throw BQLExecutionError.unsupportedFunction(name)
-            }
-            guard case .string(let baseCurrency) = values[0],
-                  case .string(let quoteCurrency) = values[1]
-            else {
-                throw BQLExecutionError.invalidType
-            }
-
-            let date: Date?
-            if values.count == 3 {
-                guard case .date(let suppliedDate) = values[2] else {
-                    throw BQLExecutionError.invalidType
-                }
-                date = suppliedDate
-            } else {
-                date = nil
-            }
-            return getprice(base: baseCurrency, quote: quoteCurrency, date: date)
-
-        case "number":
-            guard values.count == 1 else {
-                throw BQLExecutionError.unsupportedFunction(name)
-            }
-            return try number(values[0])
-
-        case "currency", "commodity":
-            guard values.count == 1 else {
-                throw BQLExecutionError.unsupportedFunction(name)
-            }
-            return try currency(values[0])
-
-        case "only":
-            guard values.count == 2 else {
-                throw BQLExecutionError.unsupportedFunction(name)
-            }
-            guard case .string(let currency) = values[0] else {
-                throw BQLExecutionError.invalidType
-            }
-            return try only(currency: currency, inventory: values[1])
-
-        case "empty":
-            guard values.count == 1 else {
-                throw BQLExecutionError.unsupportedFunction(name)
-            }
-            return try empty(values[0])
-
-        case "filter_currency":
-            guard values.count == 2 else {
-                throw BQLExecutionError.unsupportedFunction(name)
-            }
-            guard case .string(let currency) = values[1] else {
-                throw BQLExecutionError.invalidType
-            }
-            return try filterCurrency(values[0], currency: currency)
-
-        case "possign":
-            guard values.count == 2 else {
-                throw BQLExecutionError.unsupportedFunction(name)
-            }
-            guard case .string(let account) = values[1] else {
-                throw BQLExecutionError.invalidType
-            }
-            return try possign(values[0], account: account)
-
+        // Functions
         case "maxwidth":
             guard values.count == 2 else {
                 throw BQLExecutionError.unsupportedFunction(name)
@@ -188,201 +70,7 @@ struct BuiltinFunctionEvaluator {
             }
             return .string(String(text.prefix(max(width, 0))))
 
-        case "root":
-            guard values.count == 1 || values.count == 2 else {
-                throw BQLExecutionError.unsupportedFunction(name)
-            }
-            if values[0] == .null {
-                return .null
-            }
-            guard case .string(let account) = values[0] else {
-                throw BQLExecutionError.invalidType
-            }
-
-            let componentCount: Int
-            if values.count == 2 {
-                if values[1] == .null {
-                    return .null
-                }
-                guard let count = asInt(values[1]) else {
-                    throw BQLExecutionError.invalidType
-                }
-                componentCount = count
-            } else {
-                componentCount = 1
-            }
-
-            return .string(accountRoot(account, components: componentCount))
-
-        case "parent":
-            guard values.count == 1 else {
-                throw BQLExecutionError.unsupportedFunction(name)
-            }
-            if values[0] == .null {
-                return .null
-            }
-            guard case .string(let account) = values[0] else {
-                throw BQLExecutionError.invalidType
-            }
-            return parentAccount(account).map(RuntimeValue.string) ?? .null
-
-        case "leaf":
-            guard values.count == 1 else {
-                throw BQLExecutionError.unsupportedFunction(name)
-            }
-            if values[0] == .null {
-                return .null
-            }
-            guard case .string(let account) = values[0] else {
-                throw BQLExecutionError.invalidType
-            }
-            return leafAccount(account).map(RuntimeValue.string) ?? .null
-
-        case "grep":
-            guard values.count == 2 else {
-                throw BQLExecutionError.unsupportedFunction(name)
-            }
-            if values.contains(.null) {
-                return .null
-            }
-            guard case .string(let pattern) = values[0],
-                  case .string(let string) = values[1]
-            else {
-                throw BQLExecutionError.invalidType
-            }
-            return firstRegexMatch(pattern: pattern, in: string).map(RuntimeValue.string) ?? .null
-
-        case "grepn":
-            guard values.count == 3 else {
-                throw BQLExecutionError.unsupportedFunction(name)
-            }
-            if values.contains(.null) {
-                return .null
-            }
-            guard case .string(let pattern) = values[0],
-                  case .string(let string) = values[1],
-                  let groupIndex = asInt(values[2])
-            else {
-                throw BQLExecutionError.invalidType
-            }
-            return regexGroup(pattern: pattern, in: string, index: groupIndex).map(RuntimeValue.string) ?? .null
-
-        case "subst":
-            guard values.count == 3 else {
-                throw BQLExecutionError.unsupportedFunction(name)
-            }
-            if values.contains(.null) {
-                return .null
-            }
-            guard case .string(let pattern) = values[0],
-                  case .string(let replacement) = values[1],
-                  case .string(let string) = values[2]
-            else {
-                throw BQLExecutionError.invalidType
-            }
-            return substituteRegex(pattern: pattern, replacement: replacement, in: string).map(RuntimeValue.string) ?? .null
-
-        case "upper":
-            guard values.count == 1 else {
-                throw BQLExecutionError.unsupportedFunction(name)
-            }
-            if values[0] == .null {
-                return .null
-            }
-            guard case .string(let string) = values[0] else {
-                throw BQLExecutionError.invalidType
-            }
-            return .string(string.uppercased())
-
-        case "lower":
-            guard values.count == 1 else {
-                throw BQLExecutionError.unsupportedFunction(name)
-            }
-            if values[0] == .null {
-                return .null
-            }
-            guard case .string(let string) = values[0] else {
-                throw BQLExecutionError.invalidType
-            }
-            return .string(string.lowercased())
-
-        case "open_date":
-            guard values.count == 1 else {
-                throw BQLExecutionError.unsupportedFunction(name)
-            }
-            if values[0] == .null {
-                return .null
-            }
-            guard case .string(let account) = values[0] else {
-                throw BQLExecutionError.invalidType
-            }
-            return lookupAccount(account)?["open_date"] ?? .null
-
-        case "close_date":
-            guard values.count == 1 else {
-                throw BQLExecutionError.unsupportedFunction(name)
-            }
-            if values[0] == .null {
-                return .null
-            }
-            guard case .string(let account) = values[0] else {
-                throw BQLExecutionError.invalidType
-            }
-            return lookupAccount(account)?["close_date"] ?? .null
-
-        case "open_meta":
-            guard values.count == 1 || values.count == 2 else {
-                throw BQLExecutionError.unsupportedFunction(name)
-            }
-            if values[0] == .null {
-                return .null
-            }
-            guard case .string(let account) = values[0] else {
-                throw BQLExecutionError.invalidType
-            }
-
-            guard let accountRow = lookupAccount(account),
-                  case .dict(let metadata) = accountRow["open_meta"] ?? .null
-            else {
-                return .null
-            }
-
-            if values.count == 1 {
-                return .dict(metadata)
-            }
-            if values[1] == .null {
-                return .null
-            }
-            guard case .string(let key) = values[1] else {
-                throw BQLExecutionError.invalidType
-            }
-            return metadata[key] ?? .null
-
-        case "account_sortkey":
-            guard values.count == 1 else {
-                throw BQLExecutionError.unsupportedFunction(name)
-            }
-            if values[0] == .null {
-                return .null
-            }
-            guard case .string(let account) = values[0] else {
-                throw BQLExecutionError.invalidType
-            }
-            let index = accountSortIndex(account)
-            return .string("\(index)-\(account)")
-
-        case "has_account":
-            guard values.count == 1 else {
-                throw BQLExecutionError.unsupportedFunction(name)
-            }
-            if values[0] == .null {
-                return .null
-            }
-            guard case .string(let pattern) = values[0] else {
-                throw BQLExecutionError.invalidType
-            }
-            return .bool(rowHasAccount(row: row, pattern: pattern))
-
+        // Operations on dates
         case "date":
             if values.count == 1 {
                 switch values[0] {
@@ -597,6 +285,320 @@ struct BuiltinFunctionEvaluator {
                 throw BQLExecutionError.invalidType
             }
             return dateBin(stride: stride, source: source, origin: origin).map(RuntimeValue.date) ?? .null
+
+        // Operations on accounts
+        case "root":
+            guard values.count == 1 || values.count == 2 else {
+                throw BQLExecutionError.unsupportedFunction(name)
+            }
+            if values[0] == .null {
+                return .null
+            }
+            guard case .string(let account) = values[0] else {
+                throw BQLExecutionError.invalidType
+            }
+
+            let componentCount: Int
+            if values.count == 2 {
+                if values[1] == .null {
+                    return .null
+                }
+                guard let count = asInt(values[1]) else {
+                    throw BQLExecutionError.invalidType
+                }
+                componentCount = count
+            } else {
+                componentCount = 1
+            }
+            return .string(accountRoot(account, components: componentCount))
+
+        case "parent":
+            guard values.count == 1 else {
+                throw BQLExecutionError.unsupportedFunction(name)
+            }
+            if values[0] == .null {
+                return .null
+            }
+            guard case .string(let account) = values[0] else {
+                throw BQLExecutionError.invalidType
+            }
+            return parentAccount(account).map(RuntimeValue.string) ?? .null
+
+        case "leaf":
+            guard values.count == 1 else {
+                throw BQLExecutionError.unsupportedFunction(name)
+            }
+            if values[0] == .null {
+                return .null
+            }
+            guard case .string(let account) = values[0] else {
+                throw BQLExecutionError.invalidType
+            }
+            return leafAccount(account).map(RuntimeValue.string) ?? .null
+
+        case "grep":
+            guard values.count == 2 else {
+                throw BQLExecutionError.unsupportedFunction(name)
+            }
+            if values.contains(.null) {
+                return .null
+            }
+            guard case .string(let pattern) = values[0],
+                  case .string(let string) = values[1]
+            else {
+                throw BQLExecutionError.invalidType
+            }
+            return firstRegexMatch(pattern: pattern, in: string).map(RuntimeValue.string) ?? .null
+
+        case "grepn":
+            guard values.count == 3 else {
+                throw BQLExecutionError.unsupportedFunction(name)
+            }
+            if values.contains(.null) {
+                return .null
+            }
+            guard case .string(let pattern) = values[0],
+                  case .string(let string) = values[1],
+                  let groupIndex = asInt(values[2])
+            else {
+                throw BQLExecutionError.invalidType
+            }
+            return regexGroup(pattern: pattern, in: string, index: groupIndex).map(RuntimeValue.string) ?? .null
+
+        case "subst":
+            guard values.count == 3 else {
+                throw BQLExecutionError.unsupportedFunction(name)
+            }
+            if values.contains(.null) {
+                return .null
+            }
+            guard case .string(let pattern) = values[0],
+                  case .string(let replacement) = values[1],
+                  case .string(let string) = values[2]
+            else {
+                throw BQLExecutionError.invalidType
+            }
+            return substituteRegex(pattern: pattern, replacement: replacement, in: string).map(RuntimeValue.string) ?? .null
+
+        case "upper":
+            guard values.count == 1 else {
+                throw BQLExecutionError.unsupportedFunction(name)
+            }
+            if values[0] == .null {
+                return .null
+            }
+            guard case .string(let string) = values[0] else {
+                throw BQLExecutionError.invalidType
+            }
+            return .string(string.uppercased())
+
+        case "lower":
+            guard values.count == 1 else {
+                throw BQLExecutionError.unsupportedFunction(name)
+            }
+            if values[0] == .null {
+                return .null
+            }
+            guard case .string(let string) = values[0] else {
+                throw BQLExecutionError.invalidType
+            }
+            return .string(string.lowercased())
+
+        case "open_date":
+            guard values.count == 1 else {
+                throw BQLExecutionError.unsupportedFunction(name)
+            }
+            if values[0] == .null {
+                return .null
+            }
+            guard case .string(let account) = values[0] else {
+                throw BQLExecutionError.invalidType
+            }
+            return lookupAccount(account)?["open_date"] ?? .null
+
+        case "close_date":
+            guard values.count == 1 else {
+                throw BQLExecutionError.unsupportedFunction(name)
+            }
+            if values[0] == .null {
+                return .null
+            }
+            guard case .string(let account) = values[0] else {
+                throw BQLExecutionError.invalidType
+            }
+            return lookupAccount(account)?["close_date"] ?? .null
+
+        case "open_meta":
+            guard values.count == 1 || values.count == 2 else {
+                throw BQLExecutionError.unsupportedFunction(name)
+            }
+            if values[0] == .null {
+                return .null
+            }
+            guard case .string(let account) = values[0] else {
+                throw BQLExecutionError.invalidType
+            }
+
+            guard let accountRow = lookupAccount(account),
+                  case .dict(let metadata) = accountRow["open_meta"] ?? .null
+            else {
+                return .null
+            }
+
+            if values.count == 1 {
+                return .dict(metadata)
+            }
+            if values[1] == .null {
+                return .null
+            }
+            guard case .string(let key) = values[1] else {
+                throw BQLExecutionError.invalidType
+            }
+            return metadata[key] ?? .null
+
+        case "account_sortkey":
+            guard values.count == 1 else {
+                throw BQLExecutionError.unsupportedFunction(name)
+            }
+            if values[0] == .null {
+                return .null
+            }
+            guard case .string(let account) = values[0] else {
+                throw BQLExecutionError.invalidType
+            }
+            let index = accountSortIndex(account)
+            return .string("\(index)-\(account)")
+
+        case "has_account":
+            guard values.count == 1 else {
+                throw BQLExecutionError.unsupportedFunction(name)
+            }
+            if values[0] == .null {
+                return .null
+            }
+            guard case .string(let pattern) = values[0] else {
+                throw BQLExecutionError.invalidType
+            }
+            return .bool(rowHasAccount(row: row, pattern: pattern))
+
+        // Operation on inventories, positions and amounts
+        case "units":
+            guard values.count == 1 else {
+                throw BQLExecutionError.unsupportedFunction(name)
+            }
+            return try units(values[0])
+
+        case "cost":
+            guard values.count == 1 else {
+                throw BQLExecutionError.unsupportedFunction(name)
+            }
+            return try cost(values[0])
+
+        case "weight":
+            guard values.count == 1 else {
+                throw BQLExecutionError.unsupportedFunction(name)
+            }
+            return try weight(values[0])
+
+        case "convert":
+            guard values.count == 2 || values.count == 3 else {
+                throw BQLExecutionError.unsupportedFunction(name)
+            }
+            guard case .string(let targetCurrency) = values[1] else {
+                throw BQLExecutionError.invalidType
+            }
+
+            let date: Date?
+            if values.count == 3 {
+                guard case .date(let suppliedDate) = values[2] else {
+                    throw BQLExecutionError.invalidType
+                }
+                date = suppliedDate
+            } else {
+                date = nil
+            }
+            return try convert(values[0], targetCurrency: targetCurrency, date: date)
+
+        case "value":
+            guard values.count == 1 || values.count == 2 else {
+                throw BQLExecutionError.unsupportedFunction(name)
+            }
+            let date: Date?
+            if values.count == 2 {
+                guard case .date(let suppliedDate) = values[1] else {
+                    throw BQLExecutionError.invalidType
+                }
+                date = suppliedDate
+            } else {
+                date = nil
+            }
+            return try value(values[0], date: date)
+
+        case "getprice":
+            guard values.count == 2 || values.count == 3 else {
+                throw BQLExecutionError.unsupportedFunction(name)
+            }
+            guard case .string(let baseCurrency) = values[0],
+                  case .string(let quoteCurrency) = values[1]
+            else {
+                throw BQLExecutionError.invalidType
+            }
+
+            let date: Date?
+            if values.count == 3 {
+                guard case .date(let suppliedDate) = values[2] else {
+                    throw BQLExecutionError.invalidType
+                }
+                date = suppliedDate
+            } else {
+                date = nil
+            }
+            return getprice(base: baseCurrency, quote: quoteCurrency, date: date)
+
+        case "number":
+            guard values.count == 1 else {
+                throw BQLExecutionError.unsupportedFunction(name)
+            }
+            return try number(values[0])
+
+        case "currency", "commodity":
+            guard values.count == 1 else {
+                throw BQLExecutionError.unsupportedFunction(name)
+            }
+            return try currency(values[0])
+
+        case "only":
+            guard values.count == 2 else {
+                throw BQLExecutionError.unsupportedFunction(name)
+            }
+            guard case .string(let currency) = values[0] else {
+                throw BQLExecutionError.invalidType
+            }
+            return try only(currency: currency, inventory: values[1])
+
+        case "empty":
+            guard values.count == 1 else {
+                throw BQLExecutionError.unsupportedFunction(name)
+            }
+            return try empty(values[0])
+
+        case "filter_currency":
+            guard values.count == 2 else {
+                throw BQLExecutionError.unsupportedFunction(name)
+            }
+            guard case .string(let currency) = values[1] else {
+                throw BQLExecutionError.invalidType
+            }
+            return try filterCurrency(values[0], currency: currency)
+
+        case "possign":
+            guard values.count == 2 else {
+                throw BQLExecutionError.unsupportedFunction(name)
+            }
+            guard case .string(let account) = values[1] else {
+                throw BQLExecutionError.invalidType
+            }
+            return try possign(values[0], account: account)
 
         default:
             throw BQLExecutionError.unsupportedFunction(name)
