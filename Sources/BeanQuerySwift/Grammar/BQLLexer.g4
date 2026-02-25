@@ -77,7 +77,7 @@ SINGLE_QUOTED_STRING: '\'' ( '\'\'' | ~['\r\n] )* '\'';
 IDENTIFIER: [a-z_] [a-z0-9_]*;
 
 BLOCK_COMMENT: '/*' .*? '*/' -> skip;
-LINE_COMMENT: ';' ~[\r\n]* -> skip;
+LINE_COMMENT: (';' | '--') ~[\r\n]* -> skip;
 WS: [ \t\r\n\f]+ -> skip;
 
 fragment DIGIT: [0-9];

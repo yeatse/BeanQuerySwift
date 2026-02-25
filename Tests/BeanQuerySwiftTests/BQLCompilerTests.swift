@@ -385,4 +385,9 @@ struct BQLCompilerTests {
         }
         #expect(rootValue == "Assets")
     }
+
+    @Test func compileDashDashLineComment() throws {
+        let compiled = try engine.run("SELECT account FROM #postings -- trailing comment")
+        #expect(!compiled.targets.isEmpty)
+    }
 }

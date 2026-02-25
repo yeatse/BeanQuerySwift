@@ -116,6 +116,11 @@ struct BQLParserFacadeTests {
         #expect(tree.statement()?.selectStmt() != nil)
     }
 
+    @Test func parseDashDashLineComment() throws {
+        let tree = try BQLParserFacade.parse("SELECT account FROM #postings -- this is a comment")
+        #expect(tree.statement()?.selectStmt() != nil)
+    }
+
     @Test func parseInvalidSQLFails() {
         #expect(throws: BQLParseError.self) {
             _ = try BQLParserFacade.parse("SELECT FROM")
