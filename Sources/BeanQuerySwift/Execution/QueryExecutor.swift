@@ -621,19 +621,19 @@ struct QueryExecutor {
             guard case .string(let input) = left, case .string(let pattern) = right else {
                 throw BQLExecutionError.invalidType
             }
-            return .bool(matches(pattern: pattern, in: input, options: [.caseInsensitive]))
+            return .bool(matches(pattern: pattern, in: input, caseInsensitive: true))
 
         case .notMatch:
             guard case .string(let input) = left, case .string(let pattern) = right else {
                 throw BQLExecutionError.invalidType
             }
-            return .bool(!matches(pattern: pattern, in: input, options: [.caseInsensitive]))
+            return .bool(!matches(pattern: pattern, in: input, caseInsensitive: true))
 
         case .matches:
             guard case .string(let pattern) = left, case .string(let input) = right else {
                 throw BQLExecutionError.invalidType
             }
-            return .bool(matches(pattern: pattern, in: input, options: []))
+            return .bool(matches(pattern: pattern, in: input, caseInsensitive: false))
         }
     }
 
@@ -792,12 +792,10 @@ struct QueryExecutor {
         }
     }
 
-    private func matches(pattern: String, in input: String, options: NSRegularExpression.Options) -> Bool {
-        guard let regex = try? NSRegularExpression(pattern: pattern, options: options) else {
-            return false
-        }
-        let range = NSRange(input.startIndex..<input.endIndex, in: input)
-        return regex.firstMatch(in: input, range: range) != nil
+    private func matches(pattern: String, in input: String, caseInsensitive: Bool) -> Bool {
+        guard let regex = try? Regex(pattern) else { return false }
+        let r = caseInsensitive ? regex.ignoresCase() : regex
+        return input.contains(r)
     }
 
     private func renderValue(_ value: RuntimeValue) -> String {

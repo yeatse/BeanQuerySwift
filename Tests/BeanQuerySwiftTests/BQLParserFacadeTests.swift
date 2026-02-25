@@ -57,6 +57,8 @@ struct BQLParserFacadeTests {
         "SELECT close_date(account) FROM #postings",
         "SELECT open_meta(account, 'key') FROM #postings",
         "SELECT has_account('Assets:Cash') FROM #postings",
+        "SELECT findfirst('Assets:.*', accounts) FROM entries",
+        "SELECT joinstr(accounts) FROM entries",
         "SELECT convert(position, 'USD') FROM #postings",
         "SELECT getprice('VTI', 'USD') FROM #",
         "SELECT only('USD', cost(sum(position))) FROM #postings",

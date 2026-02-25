@@ -51,6 +51,8 @@ struct BQLCompilerTests {
         "SELECT close_date(account) FROM #postings",
         "SELECT open_meta(account, 'key') FROM #postings",
         "SELECT has_account('Assets:Cash') FROM #postings",
+        "SELECT findfirst('Assets:.*', accounts) FROM entries",
+        "SELECT joinstr(accounts) FROM entries",
         "SELECT 1 + 2 FROM #",
         "SELECT true AND false FROM #",
         "SELECT account_sortkey(account) FROM #postings",

@@ -113,4 +113,41 @@ struct BuiltinAccountFunctionExecutionTests {
         #expect(postingResult.columns == ["has_assets"])
         #expect(postingResult.rows == [[.bool(false)]])
     }
+
+    @Test func runFindfirstFunction() throws {
+        let context = BeancountQueryContextBuilder.makeContext(from: try BeancountTestFixtures.sampleAccountFunctionLedger())
+        let result = try engine.run(
+            "SELECT findfirst('Assets:.*', accounts) AS matched, findfirst('Liabilities:.*', accounts) AS missing FROM entries WHERE type = 'transaction'",
+            in: context
+        )
+
+        #expect(result.columns == ["matched", "missing"])
+        #expect(result.rows == [[.string("Assets:Tests"), .null]])
+    }
+
+    @Test func runFindfirstSortsCandidatesBeforeMatching() throws {
+        let context = QueryContext(tables: [
+            "entries": [[
+                "accounts": .list([.string("Expenses:Zed"), .string("Assets:Alpha"), .string("Assets:Beta")]),
+            ]]
+        ])
+        let result = try engine.run(
+            "SELECT findfirst('Assets:.*', accounts) AS matched FROM entries",
+            in: context
+        )
+
+        #expect(result.columns == ["matched"])
+        #expect(result.rows == [[.string("Assets:Alpha")]])
+    }
+
+    @Test func runJoinstrFunction() throws {
+        let context = BeancountQueryContextBuilder.makeContext(from: try BeancountTestFixtures.sampleAccountFunctionLedger())
+        let result = try engine.run(
+            "SELECT joinstr(accounts) AS joined FROM entries WHERE type = 'transaction'",
+            in: context
+        )
+
+        #expect(result.columns == ["joined"])
+        #expect(result.rows == [[.string("Assets:Tests,Expenses:Tests")]])
+    }
 }

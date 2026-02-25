@@ -567,6 +567,32 @@ struct BuiltinFunctionEvaluator {
             }
             return try currency(values[0])
 
+        case "findfirst":
+            guard values.count == 2 else {
+                throw BQLExecutionError.unsupportedFunction(name)
+            }
+            if values.contains(.null) {
+                return .null
+            }
+            guard case .string(let pattern) = values[0],
+                  let stringValues = asStringList(values[1])
+            else {
+                throw BQLExecutionError.invalidType
+            }
+            return findFirst(pattern: pattern, in: stringValues).map(RuntimeValue.string) ?? .null
+
+        case "joinstr":
+            guard values.count == 1 else {
+                throw BQLExecutionError.unsupportedFunction(name)
+            }
+            if values[0] == .null {
+                return .null
+            }
+            guard let stringValues = asStringList(values[0]) else {
+                throw BQLExecutionError.invalidType
+            }
+            return .string(stringValues.joined(separator: ","))
+
         case "only":
             guard values.count == 2 else {
                 throw BQLExecutionError.unsupportedFunction(name)
@@ -937,90 +963,98 @@ struct BuiltinFunctionEvaluator {
     }
 
     private func firstRegexMatch(pattern: String, in input: String) -> String? {
-        guard let regex = try? NSRegularExpression(pattern: pattern, options: []) else {
-            return nil
-        }
-        let range = NSRange(input.startIndex..<input.endIndex, in: input)
-        guard let match = regex.firstMatch(in: input, range: range),
-              let matchRange = Range(match.range(at: 0), in: input)
+        guard let regex = try? Regex(pattern),
+              let match = input.firstMatch(of: regex)
         else {
             return nil
         }
-        return String(input[matchRange])
+        return String(input[match.range])
     }
 
     private func regexGroup(pattern: String, in input: String, index: Int) -> String? {
         guard index >= 0,
-              let regex = try? NSRegularExpression(pattern: pattern, options: [])
+              let regex = try? Regex(pattern),
+              let match = input.firstMatch(of: regex)
         else {
             return nil
         }
-        let range = NSRange(input.startIndex..<input.endIndex, in: input)
-        guard let match = regex.firstMatch(in: input, range: range),
-              index < match.numberOfRanges,
-              let groupRange = Range(match.range(at: index), in: input)
+        guard index < match.output.count,
+              let substring = match.output[index].substring
         else {
             return nil
         }
-        return String(input[groupRange])
+        return String(substring)
     }
 
     private func substituteRegex(pattern: String, replacement: String, in input: String) -> String? {
-        guard let regex = try? NSRegularExpression(pattern: pattern, options: []) else {
+        guard let regex = try? Regex(pattern) else { return nil }
+        return input.replacing(regex) { match in
+            var result = ""
+            var iterator = replacement.makeIterator()
+            var pendingBackslash = false
+            while let ch = iterator.next() {
+                if pendingBackslash {
+                    if ch.isNumber,
+                       let digit = ch.wholeNumberValue,
+                       digit < match.output.count,
+                       let sub = match.output[digit].substring {
+                        result.append(contentsOf: sub)
+                    } else {
+                        result.append(ch)
+                    }
+                    pendingBackslash = false
+                    continue
+                }
+                if ch == "\\" {
+                    pendingBackslash = true
+                    continue
+                }
+                result.append(ch)
+            }
+            return result
+        }
+    }
+
+    private func asStringList(_ value: RuntimeValue) -> [String]? {
+        guard case .list(let values) = value else {
             return nil
         }
 
-        let range = NSRange(input.startIndex..<input.endIndex, in: input)
-        let template = swiftRegexTemplate(fromPython: replacement)
-        return regex.stringByReplacingMatches(in: input, options: [], range: range, withTemplate: template)
+        var result: [String] = []
+        result.reserveCapacity(values.count)
+        for value in values {
+            guard case .string(let stringValue) = value else {
+                return nil
+            }
+            result.append(stringValue)
+        }
+        return result
     }
 
-    private func swiftRegexTemplate(fromPython replacement: String) -> String {
-        var result = ""
-        var iterator = replacement.makeIterator()
-        var pendingBackslash = false
-
-        while let character = iterator.next() {
-            if pendingBackslash {
-                if character.isNumber {
-                    result.append("$")
-                    result.append(character)
-                } else {
-                    result.append(character)
-                }
-                pendingBackslash = false
-                continue
-            }
-
-            if character == "\\" {
-                pendingBackslash = true
-                continue
-            }
-
-            if character == "$" {
-                result.append("\\$")
-            } else {
-                result.append(character)
-            }
+    private func findFirst(pattern: String, in values: [String]) -> String? {
+        guard !values.isEmpty,
+              let regex = try? Regex(pattern)
+        else {
+            return nil
         }
 
-        if pendingBackslash {
-            result.append("\\")
+        for candidate in values.sorted() {
+            if candidate.prefixMatch(of: regex) != nil {
+                return candidate
+            }
         }
-
-        return result
+        return nil
     }
 
     private func rowHasAccount(row: QueryRow?, pattern: String) -> Bool {
         guard let row,
-              let regex = try? NSRegularExpression(pattern: pattern, options: [])
+              let regex = try? Regex(pattern)
         else {
             return false
         }
 
         func matches(_ value: String) -> Bool {
-            let range = NSRange(value.startIndex..<value.endIndex, in: value)
-            return regex.firstMatch(in: value, range: range) != nil
+            value.contains(regex)
         }
 
         if case .list(let values) = row["accounts"] {

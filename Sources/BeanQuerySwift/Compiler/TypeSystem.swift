@@ -52,6 +52,8 @@ private struct FunctionRegistry {
         FunctionSignature(name: "number", arguments: [.object], result: .decimal),
         FunctionSignature(name: "currency", arguments: [.object], result: .string),
         FunctionSignature(name: "commodity", arguments: [.object], result: .string),
+        FunctionSignature(name: "findfirst", arguments: [.string, .list], result: .string),
+        FunctionSignature(name: "joinstr", arguments: [.list], result: .string),
         FunctionSignature(name: "only", arguments: [.string, .object], result: .object),
         FunctionSignature(name: "empty", arguments: [.object], result: .bool),
         FunctionSignature(name: "filter_currency", arguments: [.object, .string], result: .object),
