@@ -178,11 +178,18 @@ struct BQLExecutionTests {
     }
 
     @Test func runPrintQuery() throws {
-        let result = try engine.run("PRINT", in: context)
+        let ledger = try BeancountTestFixtures.sampleLedger()
+        let result = try engine.run("PRINT", in: ledger)
 
-        #expect(result.rows.count == 2)
-        #expect(result.columns.contains("type"))
-        #expect(result.columns.contains("year"))
+        #expect(result.columns == ["ROW(*)"])
+        #expect(result.rows.count == ledger.directives.count)
+        for row in result.rows {
+            #expect(row.count == 1)
+            guard case .directive = row[0] else {
+                Issue.record("expected directive runtime value")
+                continue
+            }
+        }
     }
 
     @Test func runPivotByQuery() throws {

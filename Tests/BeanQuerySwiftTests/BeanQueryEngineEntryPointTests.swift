@@ -44,4 +44,37 @@ struct BeanQueryEngineEntryPointTests {
         #expect(parameterized.columns == ["account"])
         #expect(parameterized.rows.count == 2)
     }
+
+    @Test func runAndRenderInOneStep() throws {
+        let engine = BeanQueryEngine()
+        let ledger = try BeancountTestFixtures.sampleLedger()
+
+        let rendered = try engine.run(
+            "SELECT account, number FROM postings WHERE account = 'Assets:Cash' ORDER BY number DESC",
+            in: ledger,
+            as: .csv
+        )
+
+        #expect(
+            rendered ==
+            """
+            account,number
+            Assets:Cash,1000
+            Assets:Cash, -80
+            """ + "\n"
+        )
+    }
+
+    @Test func runAndRenderPrintForcesBeancountFormat() throws {
+        let engine = BeanQueryEngine()
+        let ledger = try BeancountTestFixtures.sampleLedger()
+
+        let rendered = try engine.run(
+            "PRINT",
+            in: ledger,
+            as: .text
+        )
+
+        #expect(rendered == ledger.directives.map(\.description).joined())
+    }
 }

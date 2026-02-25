@@ -147,6 +147,10 @@ struct BQLCompilerTests {
         }
         #expect(tableName == "entries")
         #expect(compiled.source.qualifiers?.close != nil)
+        #expect(compiled.targets.count == 1)
+        #expect(compiled.targets[0].name == "ROW(*)")
+        #expect(compiled.targets[0].expression == .column("entry"))
+        #expect(!compiled.targets[0].isAggregate)
         #expect(compiled.groupIndexes == nil)
         #expect(compiled.pivotIndexes == nil)
     }

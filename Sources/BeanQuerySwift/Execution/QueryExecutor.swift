@@ -913,6 +913,8 @@ struct QueryExecutor {
             return position.description
         case .inventory(let inventory):
             return inventory.description
+        case .directive(let directive):
+            return directive.description.trimmingCharacters(in: .newlines)
         case .dict(let dictionary):
             let keys = dictionary.keys.sorted()
             let parts = keys.map { key in

@@ -26,6 +26,7 @@ If grammar changes are made, commit generated files in `Sources/BeanQuerySwift/G
 ## Code Map
 
 - Public API: `Sources/BeanQuerySwift/API/BeanQueryEngine.swift`
+- Renderer API: `Sources/BeanQuerySwift/API/QueryRenderer.swift`
 - Parse and AST:
   - `Sources/BeanQuerySwift/Parser/BQLParserFacade.swift`
   - `Sources/BeanQuerySwift/Parser/BQLAstBuilder.swift`
@@ -56,6 +57,7 @@ When adding/changing behavior, add tests in the matching suite:
 - Runtime execution: `Tests/BeanQuerySwiftTests/BQLExecutionTests.swift`
 - Builtin functions (general): `Tests/BeanQuerySwiftTests/BuiltinFunctionExecutionTests.swift`
 - Builtin functions (account ops): `Tests/BeanQuerySwiftTests/BuiltinAccountFunctionExecutionTests.swift`
+- Renderer behavior: `Tests/BeanQuerySwiftTests/QueryRendererTests.swift`
 - Beancount adapters/integration: `Tests/BeanQuerySwiftTests/BeancountSourceAdapterTests.swift`
 
 Always run `swift test` before finalizing.

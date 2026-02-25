@@ -14,6 +14,12 @@ Implemented statements:
 - `JOURNAL` (desugared to `SELECT`)
 - `PRINT`
 
+Implemented renderers:
+
+- `text` (table renderer)
+- `csv`
+- `beancount` (prints directive rows in Beancount syntax)
+
 Implemented clauses and features:
 
 - `FROM` (table/hash/subselect and Beancount qualifiers)
@@ -104,6 +110,19 @@ import BeancountSwift
 
 let engine = BeanQueryEngine()
 let result = try engine.run("BALANCES AT units", in: parsedLedger)
+```
+
+One-step query + render:
+
+```swift
+import BeanQuerySwift
+
+let engine = BeanQueryEngine()
+let rendered = try engine.run(
+    "SELECT account, number FROM postings ORDER BY number DESC",
+    in: parsedLedger,
+    as: .csv
+)
 ```
 
 ## Development

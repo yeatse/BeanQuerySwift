@@ -99,6 +99,7 @@ public enum BeancountQueryContextBuilder {
 
         for (index, directive) in directives.enumerated() {
             var row: QueryRow = [:]
+            row["entry"] = .directive(directive)
             row["id"] = .int(index)
             row["date"] = .date(directive.date)
             row["year"] = .int(calendar.component(.year, from: directive.date))

@@ -104,7 +104,13 @@ struct BQLCompiler {
             filter = nil
         }
 
-        let targets = try compileTargets(.asterisk, source: source, context: context)
+        let targets = [
+            EvalTarget(
+                expression: .column("entry"),
+                name: "ROW(*)",
+                isAggregate: false
+            )
+        ]
         return EvalQuery(
             source: source,
             targets: targets,

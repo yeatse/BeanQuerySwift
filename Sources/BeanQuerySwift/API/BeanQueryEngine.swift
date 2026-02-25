@@ -21,55 +21,144 @@ public struct BeanQueryEngine {
         try BQLParserFacade.parseStatement(bql)
     }
 
+    private func compileStatement(
+        _ statement: BQLStatement,
+        parameters: BQLParameters? = nil,
+        context: QueryContext? = nil
+    ) throws -> EvalQuery {
+        try compiler.compile(statement, parameters: parameters, context: context)
+    }
+
     func compile(
         _ bql: String,
         parameters: BQLParameters? = nil,
         context: QueryContext? = nil
     ) throws -> EvalQuery {
-        try compiler.compile(parse(bql), parameters: parameters, context: context)
+        try compileStatement(parse(bql), parameters: parameters, context: context)
     }
 
-    /// One-step compile entry point, useful for introspecting query plans.
-    public func run(_ bql: String) throws -> EvalQuery {
-        try compile(bql)
-    }
-
-    public func run(_ bql: String, parameters: BQLParameters) throws -> EvalQuery {
-        try compile(bql, parameters: parameters)
-    }
-
-    public func run(_ bql: String, in context: QueryContext) throws -> QueryResult {
-        try executor.execute(compile(bql, context: context), context: context)
-    }
-
-    public func run(_ bql: String, parameters: BQLParameters, in context: QueryContext) throws -> QueryResult {
+    private func execute(
+        _ statement: BQLStatement,
+        parameters: BQLParameters?,
+        in context: QueryContext
+    ) throws -> QueryResult {
         try executor.execute(
-            compile(bql, parameters: parameters, context: context),
+            compileStatement(statement, parameters: parameters, context: context),
             context: context
         )
     }
 
-    public func run(_ bql: String, in ledger: ParsedLedger<Cost>) throws -> QueryResult {
-        try run(bql, in: BeancountQueryContextBuilder.makeContext(from: ledger))
+    private func execute(
+        _ bql: String,
+        parameters: BQLParameters?,
+        in context: QueryContext
+    ) throws -> QueryResult {
+        try execute(parse(bql), parameters: parameters, in: context)
     }
 
-    public func run(_ bql: String, parameters: BQLParameters, in ledger: ParsedLedger<Cost>) throws -> QueryResult {
-        try run(
+    private func renderFormat(
+        for statement: BQLStatement,
+        requested format: QueryRenderFormat
+    ) -> QueryRenderFormat {
+        if case .print = statement {
+            return .beancount
+        }
+        return format
+    }
+
+    /// One-step compile entry point, useful for introspecting query plans.
+    public func run(
+        _ bql: String,
+        parameters: BQLParameters? = nil
+    ) throws -> EvalQuery {
+        try compile(bql, parameters: parameters)
+    }
+
+    public func run(
+        _ bql: String,
+        parameters: BQLParameters? = nil,
+        in context: QueryContext
+    ) throws -> QueryResult {
+        try execute(bql, parameters: parameters, in: context)
+    }
+
+    public func run(
+        _ bql: String,
+        parameters: BQLParameters? = nil,
+        in ledger: ParsedLedger<Cost>
+    ) throws -> QueryResult {
+        try execute(
             bql,
             parameters: parameters,
             in: BeancountQueryContextBuilder.makeContext(from: ledger)
         )
     }
 
-    public func run(_ bql: String, in directives: [Directive<Cost>]) throws -> QueryResult {
-        try run(bql, in: BeancountQueryContextBuilder.makeContext(directives: directives))
-    }
-
-    public func run(_ bql: String, parameters: BQLParameters, in directives: [Directive<Cost>]) throws -> QueryResult {
-        try run(
+    public func run(
+        _ bql: String,
+        parameters: BQLParameters? = nil,
+        in directives: [Directive<Cost>]
+    ) throws -> QueryResult {
+        try execute(
             bql,
             parameters: parameters,
             in: BeancountQueryContextBuilder.makeContext(directives: directives)
+        )
+    }
+
+    public func render(
+        _ result: QueryResult,
+        as format: QueryRenderFormat = .text,
+        options: QueryRenderOptions = .init()
+    ) throws -> String {
+        try QueryRenderer.render(result, format: format, options: options)
+    }
+
+    public func run(
+        _ bql: String,
+        parameters: BQLParameters? = nil,
+        in context: QueryContext,
+        as format: QueryRenderFormat,
+        options: QueryRenderOptions = .init()
+    ) throws -> String {
+        let statement = try parse(bql)
+        let result = try execute(statement, parameters: parameters, in: context)
+        return try render(
+            result,
+            as: renderFormat(for: statement, requested: format),
+            options: options
+        )
+    }
+
+    public func run(
+        _ bql: String,
+        parameters: BQLParameters? = nil,
+        in ledger: ParsedLedger<Cost>,
+        as format: QueryRenderFormat,
+        options: QueryRenderOptions = .init()
+    ) throws -> String {
+        try run(
+            bql,
+            parameters: parameters,
+            in: BeancountQueryContextBuilder.makeContext(from: ledger),
+            as: format,
+            options: options
+        )
+    }
+
+    public func run(
+        _ bql: String,
+        parameters: BQLParameters? = nil,
+        in directives: [Directive<Cost>],
+        as format: QueryRenderFormat,
+        options: QueryRenderOptions = .init()
+    ) throws -> String {
+        try run(
+            bql,
+            parameters: parameters,
+            in: BeancountQueryContextBuilder.makeContext(directives: directives),
+            as: format,
+            options: options
         )
     }
 }
