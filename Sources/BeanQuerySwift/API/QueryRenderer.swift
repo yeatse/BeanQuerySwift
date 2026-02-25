@@ -1,21 +1,43 @@
 import Foundation
 import BeancountSwift
 
+/// Output format for rendering query results.
 public enum QueryRenderFormat: String, Sendable {
+    /// Human-readable aligned table output.
     case text
+    /// Comma-separated output with CSV escaping.
     case csv
+    /// Beancount source format output (expects directive values).
     case beancount
 }
 
+/// Renderer options for text/csv output.
 public struct QueryRenderOptions: Sendable {
+    /// Whether to render text tables with borders.
     public var boxed: Bool
+    /// Whether list/inventory values should expand into multiple output rows.
     public var expand: Bool
+    /// Whether text headers should be narrowed to width `1` (beanquery-compatible default).
     public var narrow: Bool
+    /// Whether to insert an empty spacer row after each rendered row.
     public var spaced: Bool
+    /// Whether to use unicode border/separator characters when available.
     public var unicode: Bool
+    /// Separator used for collapsed list/inventory values.
     public var listSeparator: String
+    /// Text used to represent null values.
     public var nullValue: String
 
+    /// Creates render options.
+    ///
+    /// - Parameters:
+    ///   - boxed: Whether to render text tables with borders.
+    ///   - expand: Whether list/inventory values should expand into multiple output rows.
+    ///   - narrow: Whether text headers are narrowed to width `1`.
+    ///   - spaced: Whether to insert an empty spacer row after each rendered row.
+    ///   - unicode: Whether to use unicode border/separator characters.
+    ///   - listSeparator: Separator used for collapsed list/inventory values.
+    ///   - nullValue: Text used to represent null values.
     public init(
         boxed: Bool = false,
         expand: Bool = false,
@@ -35,7 +57,9 @@ public struct QueryRenderOptions: Sendable {
     }
 }
 
+/// Rendering errors returned by `QueryRenderer`.
 public enum QueryRenderError: LocalizedError, Equatable {
+    /// A beancount render row did not contain a directive value.
     case missingBeancountEntry(rowIndex: Int)
 
     public var errorDescription: String? {
@@ -46,7 +70,16 @@ public enum QueryRenderError: LocalizedError, Equatable {
     }
 }
 
+/// Renderer utilities for converting `QueryResult` values into textual formats.
 public enum QueryRenderer {
+    /// Renders a query result into the given format.
+    ///
+    /// - Parameters:
+    ///   - result: Query result to render.
+    ///   - format: Output format (`text`, `csv`, or `beancount`).
+    ///   - options: Renderer options used by text/csv renderers.
+    /// - Returns: Rendered string output.
+    /// - Throws: Rendering errors (for example invalid beancount row shape).
     public static func render(
         _ result: QueryResult,
         format: QueryRenderFormat = .text,
@@ -60,6 +93,22 @@ public enum QueryRenderer {
         case .beancount:
             return try renderBeancount(result)
         }
+    }
+}
+
+public extension QueryResult {
+    /// Renders this query result into the given format.
+    ///
+    /// - Parameters:
+    ///   - format: Output format (`text`, `csv`, or `beancount`).
+    ///   - options: Renderer options used by text/csv renderers.
+    /// - Returns: Rendered string output.
+    /// - Throws: Rendering errors (for example invalid beancount row shape).
+    func render(
+        as format: QueryRenderFormat = .text,
+        options: QueryRenderOptions = .init()
+    ) throws -> String {
+        try QueryRenderer.render(self, format: format, options: options)
     }
 }
 

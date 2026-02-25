@@ -5,7 +5,7 @@ import Testing
 struct BeanQueryEngineEntryPointTests {
     @Test func makeEngineCreatesWorkingCompiler() throws {
         let engine = BeanQuerySwift.makeEngine(defaultTableName: "postings", supportImplicitGroupBy: true)
-        let compiled = try engine.run("SELECT 1 + 2 AS total FROM #")
+        let compiled = try engine.compile("SELECT 1 + 2 AS total FROM #")
 
         #expect(compiled.targets.count == 1)
         #expect(compiled.targets[0].name == "total")
@@ -45,15 +45,14 @@ struct BeanQueryEngineEntryPointTests {
         #expect(parameterized.rows.count == 2)
     }
 
-    @Test func runAndRenderInOneStep() throws {
+    @Test func runAndRenderWithComposedAPI() throws {
         let engine = BeanQueryEngine()
         let ledger = try BeancountTestFixtures.sampleLedger()
 
         let rendered = try engine.run(
             "SELECT account, number FROM postings WHERE account = 'Assets:Cash' ORDER BY number DESC",
-            in: ledger,
-            as: .csv
-        )
+            in: ledger
+        ).render(as: .csv)
 
         #expect(
             rendered ==
@@ -65,15 +64,11 @@ struct BeanQueryEngineEntryPointTests {
         )
     }
 
-    @Test func runAndRenderPrintForcesBeancountFormat() throws {
+    @Test func runAndRenderPrintWithExplicitBeancountFormat() throws {
         let engine = BeanQueryEngine()
         let ledger = try BeancountTestFixtures.sampleLedger()
 
-        let rendered = try engine.run(
-            "PRINT",
-            in: ledger,
-            as: .text
-        )
+        let rendered = try engine.run("PRINT", in: ledger).render(as: .beancount)
 
         #expect(rendered == ledger.directives.map(\.description).joined())
     }

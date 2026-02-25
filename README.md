@@ -80,7 +80,7 @@ Compile only:
 import BeanQuerySwift
 
 let engine = BeanQueryEngine()
-let plan = try engine.run("SELECT account, sum(number) AS total FROM #postings GROUP BY account")
+let plan = try engine.compile("SELECT account, sum(number) AS total FROM #postings GROUP BY account")
 ```
 
 Compile + execute with a custom context:
@@ -112,7 +112,7 @@ let engine = BeanQueryEngine()
 let result = try engine.run("BALANCES AT units", in: parsedLedger)
 ```
 
-One-step query + render:
+Chain `run` + `render`:
 
 ```swift
 import BeanQuerySwift
@@ -120,9 +120,8 @@ import BeanQuerySwift
 let engine = BeanQueryEngine()
 let rendered = try engine.run(
     "SELECT account, number FROM postings ORDER BY number DESC",
-    in: parsedLedger,
-    as: .csv
-)
+    in: parsedLedger
+).render(as: .csv)
 ```
 
 ## Development

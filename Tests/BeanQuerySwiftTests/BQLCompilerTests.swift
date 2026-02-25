@@ -79,12 +79,12 @@ struct BQLCompilerTests {
 
     @Test(arguments: compileableQueries)
     func compileManyValidQueries(_ query: String) throws {
-        let compiled = try engine.run(query)
+        let compiled = try engine.compile(query)
         #expect(!compiled.targets.isEmpty)
     }
 
     @Test func compileSelectImplicitGroupBy() throws {
-        let compiled = try engine.run("SELECT account, sum(number) FROM #postings")
+        let compiled = try engine.compile("SELECT account, sum(number) FROM #postings")
 
         #expect(compiled.groupIndexes == [0])
         #expect(compiled.targets.count == 2)
@@ -99,7 +99,7 @@ struct BQLCompilerTests {
     }
 
     @Test func compileBalancesDesugarsToSelectPlan() throws {
-        let compiled = try engine.run(
+        let compiled = try engine.compile(
             "BALANCES AT units FROM CLOSE ON 2024-12-31 WHERE account ~ 'Assets:.*'"
         )
 
@@ -127,7 +127,7 @@ struct BQLCompilerTests {
     }
 
     @Test func compileJournalDesugarsToSelectPlan() throws {
-        let compiled = try engine.run(
+        let compiled = try engine.compile(
             "JOURNAL 'Assets:Cash' AT cost FROM CLOSE ON 2024-12-31"
         )
 
@@ -139,7 +139,7 @@ struct BQLCompilerTests {
     }
 
     @Test func compilePrintUsesEntriesAsDefaultTable() throws {
-        let compiled = try engine.run("PRINT FROM CLOSE ON 2024-12-31")
+        let compiled = try engine.compile("PRINT FROM CLOSE ON 2024-12-31")
 
         guard case .named(let tableName) = compiled.source.table else {
             Issue.record("expected named table source")
@@ -156,7 +156,7 @@ struct BQLCompilerTests {
     }
 
     @Test func compilePivotByResolvesIndexes() throws {
-        let compiled = try engine.run(
+        let compiled = try engine.compile(
             "SELECT account, year, sum(number) AS total FROM #postings GROUP BY account, year PIVOT BY 1, 2"
         )
         #expect(compiled.pivotIndexes == [0, 1])
@@ -164,7 +164,7 @@ struct BQLCompilerTests {
 
     @Test func compileInvalidGroupByIndexFails() throws {
         do {
-            _ = try engine.run("SELECT account, sum(number) FROM #postings GROUP BY 3")
+            _ = try engine.compile("SELECT account, sum(number) FROM #postings GROUP BY 3")
             Issue.record("expected compile failure")
         } catch let error as BQLCompileError {
             #expect(error == .invalidGroupByIndex(3))
@@ -173,7 +173,7 @@ struct BQLCompilerTests {
 
     @Test func compileInvalidPivotByIndexFails() throws {
         do {
-            _ = try engine.run(
+            _ = try engine.compile(
                 "SELECT account, year, sum(number) FROM #postings GROUP BY account, year PIVOT BY 1, 4"
             )
             Issue.record("expected compile failure")
@@ -184,7 +184,7 @@ struct BQLCompilerTests {
 
     @Test func compilePivotByMissingTargetFails() throws {
         do {
-            _ = try engine.run(
+            _ = try engine.compile(
                 "SELECT account, year, sum(number) FROM #postings GROUP BY account, year PIVOT BY account, missing"
             )
             Issue.record("expected compile failure")
@@ -195,7 +195,7 @@ struct BQLCompilerTests {
 
     @Test func compilePivotByDuplicateColumnsFails() throws {
         do {
-            _ = try engine.run(
+            _ = try engine.compile(
                 "SELECT account, year, sum(number) FROM #postings GROUP BY account, year PIVOT BY 1, 1"
             )
             Issue.record("expected compile failure")
@@ -206,7 +206,7 @@ struct BQLCompilerTests {
 
     @Test func compilePivotBySecondMustBeGroupByColumnFails() throws {
         do {
-            _ = try engine.run(
+            _ = try engine.compile(
                 "SELECT account, year, sum(number) AS total FROM #postings GROUP BY account, year PIVOT BY account, total"
             )
             Issue.record("expected compile failure")
@@ -217,7 +217,7 @@ struct BQLCompilerTests {
 
     @Test func compileOpenAfterCloseFails() throws {
         do {
-            _ = try engine.run("SELECT account FROM OPEN ON 2024-02-01 CLOSE ON 2024-01-01")
+            _ = try engine.compile("SELECT account FROM OPEN ON 2024-02-01 CLOSE ON 2024-01-01")
             Issue.record("expected compile failure")
         } catch let error as BQLCompileError {
             #expect(error == .closeDateMustFollowOpenDate)
@@ -226,7 +226,7 @@ struct BQLCompilerTests {
 
     @Test func compileMixedAggregateAndNonAggregateFails() throws {
         do {
-            _ = try engine.run("SELECT number + sum(number) FROM #postings")
+            _ = try engine.compile("SELECT number + sum(number) FROM #postings")
             Issue.record("expected compile failure")
         } catch let error as BQLCompileError {
             #expect(error == .mixedAggregatesAndNonAggregates)
@@ -235,7 +235,7 @@ struct BQLCompilerTests {
 
     @Test func compileAggregateOfAggregateFails() throws {
         do {
-            _ = try engine.run("SELECT sum(max(number)) FROM #postings")
+            _ = try engine.compile("SELECT sum(max(number)) FROM #postings")
             Issue.record("expected compile failure")
         } catch let error as BQLCompileError {
             #expect(error == .aggregatesOfAggregates)
@@ -243,7 +243,7 @@ struct BQLCompilerTests {
     }
 
     @Test func compilePositionalPlaceholdersBindsToConstants() throws {
-        let compiled = try engine.run(
+        let compiled = try engine.compile(
             "SELECT account FROM #postings WHERE year = %s AND account = %s",
             parameters: .positional([.integer(2024), .string("assets:cash")])
         )
@@ -256,7 +256,7 @@ struct BQLCompilerTests {
     }
 
     @Test func compileNamedPlaceholdersBindsToConstants() throws {
-        let compiled = try engine.run(
+        let compiled = try engine.compile(
             "SELECT account FROM #postings WHERE year = %(year)s AND account = %(account)s",
             parameters: .named([
                 "year": .integer(2024),
@@ -269,7 +269,7 @@ struct BQLCompilerTests {
 
     @Test func compilePositionalPlaceholderRequiresSequence() throws {
         do {
-            _ = try engine.run(
+            _ = try engine.compile(
                 "SELECT account FROM #postings WHERE year = %s",
                 parameters: .named(["year": .integer(2024)])
             )
@@ -281,7 +281,7 @@ struct BQLCompilerTests {
 
     @Test func compileNamedPlaceholderRequiresMapping() throws {
         do {
-            _ = try engine.run(
+            _ = try engine.compile(
                 "SELECT account FROM #postings WHERE year = %(year)s",
                 parameters: .positional([.integer(2024)])
             )
@@ -293,7 +293,7 @@ struct BQLCompilerTests {
 
     @Test func compileMissingNamedPlaceholderFails() throws {
         do {
-            _ = try engine.run(
+            _ = try engine.compile(
                 "SELECT account FROM #postings WHERE year = %(year)s AND account = %(account)s",
                 parameters: .named(["year": .integer(2024)])
             )
@@ -305,7 +305,7 @@ struct BQLCompilerTests {
 
     @Test func compilePlaceholderCountMismatchFails() throws {
         do {
-            _ = try engine.run(
+            _ = try engine.compile(
                 "SELECT account FROM #postings WHERE year = %s AND day = %s",
                 parameters: .positional([.integer(2024)])
             )
@@ -317,7 +317,7 @@ struct BQLCompilerTests {
 
     @Test func compileMixedPlaceholderStylesFails() throws {
         do {
-            _ = try engine.run(
+            _ = try engine.compile(
                 "SELECT account FROM #postings WHERE year = %s AND account = %(account)s",
                 parameters: .named(["account": .string("assets:cash")])
             )
@@ -329,7 +329,7 @@ struct BQLCompilerTests {
 
     @Test func compileAggregateInWhereFails() throws {
         do {
-            _ = try engine.run("SELECT account FROM #postings WHERE sum(number) > 0")
+            _ = try engine.compile("SELECT account FROM #postings WHERE sum(number) > 0")
             Issue.record("expected compile failure")
         } catch let error as BQLCompileError {
             #expect(error == .aggregatesNotAllowedInWhere)
@@ -338,7 +338,7 @@ struct BQLCompilerTests {
 
     @Test func compileAggregateInFromFails() throws {
         do {
-            _ = try engine.run("SELECT account FROM sum(number)")
+            _ = try engine.compile("SELECT account FROM sum(number)")
             Issue.record("expected compile failure")
         } catch let error as BQLCompileError {
             #expect(error == .aggregatesNotAllowedInFrom)
@@ -347,7 +347,7 @@ struct BQLCompilerTests {
 
     @Test func compileInvalidFunctionSignatureFails() throws {
         do {
-            _ = try engine.run("SELECT account_sortkey(1) FROM #postings")
+            _ = try engine.compile("SELECT account_sortkey(1) FROM #postings")
             Issue.record("expected compile failure")
         } catch let error as BQLCompileError {
             #expect(
@@ -361,7 +361,7 @@ struct BQLCompilerTests {
 
     @Test func compileInvalidBinaryOperatorFails() throws {
         do {
-            _ = try engine.run("SELECT 'a' - 'b' FROM #postings")
+            _ = try engine.compile("SELECT 'a' - 'b' FROM #postings")
             Issue.record("expected compile failure")
         } catch let error as BQLCompileError {
             #expect(
@@ -375,14 +375,14 @@ struct BQLCompilerTests {
     }
 
     @Test func compileConstantExpressionFolding() throws {
-        let compiled = try engine.run("SELECT 1 + 2 AS total FROM #")
+        let compiled = try engine.compile("SELECT 1 + 2 AS total FROM #")
         guard case .constant(.integer(let value)) = compiled.targets[0].expression else {
             Issue.record("expected folded integer constant")
             return
         }
         #expect(value == 3)
 
-        let foldedRoot = try engine.run("SELECT root('Assets:Cash', 1) AS root FROM #")
+        let foldedRoot = try engine.compile("SELECT root('Assets:Cash', 1) AS root FROM #")
         guard case .constant(.string(let rootValue)) = foldedRoot.targets[0].expression else {
             Issue.record("expected folded string constant")
             return
@@ -391,7 +391,7 @@ struct BQLCompilerTests {
     }
 
     @Test func compileDashDashLineComment() throws {
-        let compiled = try engine.run("SELECT account FROM #postings -- trailing comment")
+        let compiled = try engine.compile("SELECT account FROM #postings -- trailing comment")
         #expect(!compiled.targets.isEmpty)
     }
 }
