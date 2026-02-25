@@ -256,4 +256,66 @@ struct BuiltinFunctionExecutionTests {
         #expect(result.columns == ["bad_date", "bad_parse", "bad_trunc", "bad_part", "bad_interval", "bad_bin"])
         #expect(result.rows == expectedRows)
     }
+
+    @Test func runMonthEndNetWorthQueryUsingIntervalArithmetic() throws {
+        let context = BeancountQueryContextBuilder.makeContext(from: try BeancountTestFixtures.sampleLotLedger())
+        let result = try engine.run(
+            """
+            SELECT
+              date_bin(interval('1 month'), date, 1970-01-01)
+                + INTERVAL('1 month') - INTERVAL('1 day') AS month_end,
+              CONVERT(
+                LAST(balance),
+                'CNY',
+                date_bin(interval('1 month'), LAST(date), 1970-01-01)
+                  + INTERVAL('1 month') - INTERVAL('1 day')
+              ) AS net_worth_cny
+            WHERE
+              account_sortkey(account) ~ '^[01]'
+            GROUP BY
+              month_end
+            ORDER BY
+              month_end DESC
+            LIMIT 5;
+            """,
+            in: context
+        )
+
+        #expect(result.columns == ["month_end", "net_worth_cny"])
+        #expect(!result.rows.isEmpty)
+        #expect(result.rows[0][0] == .date(date(2024, 2, 29)))
+
+        let monthEnds = Set(result.rows.compactMap { row -> Date? in
+            guard case .date(let value) = row[0] else {
+                return nil
+            }
+            return value
+        })
+        #expect(monthEnds.contains(date(2024, 1, 31)))
+    }
+
+    @Test func runDateIntervalOperatorsLikePythonBeanQuery() throws {
+        let context = BeancountQueryContextBuilder.makeContext(from: try BeancountTestFixtures.sampleLedger())
+        let result = try engine.run(
+            "SELECT 2016-11-20 + interval('1 months') AS add_month, 2016-11-01 + interval('1 months') - interval('1 days') AS month_end, 2024-02-05 + interval('-1 days') AS prev_day, 2024-02-05 + interval('1 day') + interval('2 days') AS plus_three_days, 2024-05-24 + interval('1 year') AS plus_year, 2024-05-24 + interval('-2 years') AS minus_two_years FROM #",
+            in: context
+        )
+
+        #expect(result.columns == [
+            "add_month",
+            "month_end",
+            "prev_day",
+            "plus_three_days",
+            "plus_year",
+            "minus_two_years",
+        ])
+        #expect(result.rows == [[
+            .date(date(2016, 12, 20)),
+            .date(date(2016, 11, 30)),
+            .date(date(2024, 2, 4)),
+            .date(date(2024, 2, 8)),
+            .date(date(2025, 5, 24)),
+            .date(date(2022, 5, 24)),
+        ]])
+    }
 }

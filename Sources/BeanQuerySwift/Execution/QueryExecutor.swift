@@ -2,6 +2,32 @@ import Foundation
 import BeancountSwift
 
 struct QueryExecutor {
+    private struct DateStride: Equatable, Sendable {
+        var years: Int
+        var months: Int
+        var days: Int
+
+        var negated: DateStride {
+            DateStride(years: -years, months: -months, days: -days)
+        }
+
+        var runtimeValue: RuntimeValue {
+            .list([.int(years), .int(months), .int(days)])
+        }
+
+        static func fromRuntimeValue(_ value: RuntimeValue) -> DateStride? {
+            guard case .list(let values) = value,
+                  values.count == 3,
+                  case .int(let years) = values[0],
+                  case .int(let months) = values[1],
+                  case .int(let days) = values[2]
+            else {
+                return nil
+            }
+            return DateStride(years: years, months: months, days: days)
+        }
+    }
+
     private final class EvaluationState {
         private var resolvedBalance: RuntimeValue?
         private var runningBalance = Inventory()
@@ -541,6 +567,19 @@ struct QueryExecutor {
     private func evaluateBinary(op: BQLBinaryOperator, left: RuntimeValue, right: RuntimeValue) throws -> RuntimeValue {
         switch op {
         case .add:
+            if let lhsDate = asDate(left), let rhsStride = asDateStride(right) {
+                return addStride(lhsDate, rhsStride).map(RuntimeValue.date) ?? .null
+            }
+            if let lhsStride = asDateStride(left), let rhsDate = asDate(right) {
+                return addStride(rhsDate, lhsStride).map(RuntimeValue.date) ?? .null
+            }
+            if let lhsStride = asDateStride(left), let rhsStride = asDateStride(right) {
+                return DateStride(
+                    years: lhsStride.years + rhsStride.years,
+                    months: lhsStride.months + rhsStride.months,
+                    days: lhsStride.days + rhsStride.days
+                ).runtimeValue
+            }
             if let l = asDecimal(left), let r = asDecimal(right) {
                 return .decimal(l + r)
             }
@@ -553,6 +592,22 @@ struct QueryExecutor {
             throw BQLExecutionError.invalidType
 
         case .sub:
+            if let lhsDate = asDate(left), let rhsStride = asDateStride(right) {
+                return addStride(lhsDate, rhsStride.negated).map(RuntimeValue.date) ?? .null
+            }
+            if let lhsDate = asDate(left), let rhsDate = asDate(right) {
+                guard let days = daysBetween(rhsDate, lhsDate) else {
+                    return .null
+                }
+                return .int(days)
+            }
+            if let lhsStride = asDateStride(left), let rhsStride = asDateStride(right) {
+                return DateStride(
+                    years: lhsStride.years - rhsStride.years,
+                    months: lhsStride.months - rhsStride.months,
+                    days: lhsStride.days - rhsStride.days
+                ).runtimeValue
+            }
             if let l = asDecimal(left), let r = asDecimal(right) {
                 return .decimal(l - r)
             }
@@ -741,6 +796,54 @@ struct QueryExecutor {
             return int
         }
         return nil
+    }
+
+    private func asDate(_ value: RuntimeValue) -> Date? {
+        if case .date(let date) = value {
+            return date
+        }
+        return nil
+    }
+
+    private func asDateStride(_ value: RuntimeValue) -> DateStride? {
+        DateStride.fromRuntimeValue(value)
+    }
+
+    private func dateCalendar() -> Calendar {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone.current
+        return calendar
+    }
+
+    private func dateParts(_ date: Date) -> (year: Int, month: Int, day: Int) {
+        let components = dateCalendar().dateComponents([.year, .month, .day], from: date)
+        return (components.year ?? 0, components.month ?? 0, components.day ?? 0)
+    }
+
+    private func buildDate(year: Int, month: Int, day: Int) -> Date? {
+        var components = DateComponents()
+        components.calendar = dateCalendar()
+        components.year = year
+        components.month = month
+        components.day = day
+        return components.date
+    }
+
+    private func normalizeDate(_ date: Date) -> Date? {
+        let parts = dateParts(date)
+        return buildDate(year: parts.year, month: parts.month, day: parts.day)
+    }
+
+    private func addStride(_ date: Date, _ stride: DateStride) -> Date? {
+        var components = DateComponents()
+        components.year = stride.years
+        components.month = stride.months
+        components.day = stride.days
+        return dateCalendar().date(byAdding: components, to: date).flatMap(normalizeDate)
+    }
+
+    private func daysBetween(_ start: Date, _ end: Date) -> Int? {
+        dateCalendar().dateComponents([.day], from: start, to: end).day
     }
 
     private func compare(_ left: RuntimeValue, _ right: RuntimeValue) -> ComparisonResult {
