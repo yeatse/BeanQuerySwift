@@ -257,6 +257,45 @@ struct BuiltinFunctionExecutionTests {
         #expect(result.rows == expectedRows)
     }
 
+    @Test func runTypeCastingFunctionsLikePythonBeanQuery() throws {
+        let context = BeancountQueryContextBuilder.makeContext(from: try BeancountTestFixtures.sampleLedger())
+        let result = try engine.run(
+            "SELECT bool(0) AS b0, bool('') AS bempty, int(TRUE) AS i_true, int(1.2) AS i_decimal, int('foo') AS i_bad, decimal('1.2') AS d_text, decimal('foo') AS d_bad, str(FALSE) AS s_false FROM #",
+            in: context
+        )
+
+        #expect(result.columns == ["b0", "bempty", "i_true", "i_decimal", "i_bad", "d_text", "d_bad", "s_false"])
+        #expect(result.rows == [[
+            .bool(false),
+            .bool(false),
+            .int(1),
+            .int(1),
+            .null,
+            .decimal(Decimal(string: "1.2")!),
+            .null,
+            .string("FALSE"),
+        ]])
+    }
+
+    @Test func runExpenseSumQueryUsingIntBoolCast() throws {
+        let context = BeancountQueryContextBuilder.makeContext(from: try BeancountTestFixtures.sampleLedger())
+        let result = try engine.run(
+            """
+            SELECT str(sum(number(cost(position)) * int(
+                account ~ '^Expenses:'
+                AND currency(cost(position)) = 'USD'
+                AND date >= 2024-01-01
+                AND date <= 2024-01-31
+              ))) + ' USD' AS total_usd
+            FROM postings
+            """,
+            in: context
+        )
+
+        #expect(result.columns == ["total_usd"])
+        #expect(result.rows == [[.string("80 USD")]])
+    }
+
     @Test func runMonthEndNetWorthQueryUsingIntervalArithmetic() throws {
         let context = BeancountQueryContextBuilder.makeContext(from: try BeancountTestFixtures.sampleLotLedger())
         let result = try engine.run(

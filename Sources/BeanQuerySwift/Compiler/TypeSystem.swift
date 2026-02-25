@@ -32,6 +32,18 @@ private struct FunctionSignature {
 
 private struct FunctionRegistry {
     private let signatures: [FunctionSignature] = [
+        FunctionSignature(name: "bool", arguments: [.object], result: .bool),
+        FunctionSignature(name: "int", arguments: [.bool], result: .int),
+        FunctionSignature(name: "int", arguments: [.int], result: .int),
+        FunctionSignature(name: "int", arguments: [.decimal], result: .int),
+        FunctionSignature(name: "int", arguments: [.string], result: .int),
+        FunctionSignature(name: "int", arguments: [.null], result: .int),
+        FunctionSignature(name: "decimal", arguments: [.bool], result: .decimal),
+        FunctionSignature(name: "decimal", arguments: [.int], result: .decimal),
+        FunctionSignature(name: "decimal", arguments: [.decimal], result: .decimal),
+        FunctionSignature(name: "decimal", arguments: [.string], result: .decimal),
+        FunctionSignature(name: "decimal", arguments: [.null], result: .decimal),
+        FunctionSignature(name: "str", arguments: [.object], result: .string),
         FunctionSignature(name: "count", arguments: [.object], result: .int),
         FunctionSignature(name: "sum", arguments: [.int], result: .int),
         FunctionSignature(name: "sum", arguments: [.decimal], result: .decimal),

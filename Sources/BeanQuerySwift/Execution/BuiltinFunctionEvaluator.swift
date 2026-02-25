@@ -56,6 +56,31 @@ struct BuiltinFunctionEvaluator {
             }
             return try absolute(values[0])
 
+        // Type casting
+        case "bool":
+            guard values.count == 1 else {
+                throw BQLExecutionError.unsupportedFunction(name)
+            }
+            return castToBool(values[0])
+
+        case "int":
+            guard values.count == 1 else {
+                throw BQLExecutionError.unsupportedFunction(name)
+            }
+            return castToInt(values[0])
+
+        case "decimal":
+            guard values.count == 1 else {
+                throw BQLExecutionError.unsupportedFunction(name)
+            }
+            return castToDecimal(values[0])
+
+        case "str":
+            guard values.count == 1 else {
+                throw BQLExecutionError.unsupportedFunction(name)
+            }
+            return castToString(values[0])
+
         // Functions
         case "maxwidth":
             guard values.count == 2 else {
@@ -647,6 +672,109 @@ struct BuiltinFunctionEvaluator {
             return .null
         default:
             throw BQLExecutionError.invalidType
+        }
+    }
+
+    private func castToBool(_ value: RuntimeValue) -> RuntimeValue {
+        switch value {
+        case .null:
+            return .null
+        case .bool(let bool):
+            return .bool(bool)
+        case .int(let int):
+            return .bool(int != 0)
+        case .decimal(let decimal):
+            return .bool(decimal != .zero)
+        case .string(let string):
+            return .bool(!string.isEmpty)
+        case .list(let values):
+            return .bool(!values.isEmpty)
+        case .inventory(let inventory):
+            return .bool(!inventory.isEmpty)
+        default:
+            return .bool(true)
+        }
+    }
+
+    private func castToInt(_ value: RuntimeValue) -> RuntimeValue {
+        switch value {
+        case .null:
+            return .null
+        case .int(let int):
+            return .int(int)
+        case .bool(let bool):
+            return .int(bool ? 1 : 0)
+        case .decimal(let decimal):
+            return .int(NSDecimalNumber(decimal: decimal).intValue)
+        case .string(let string):
+            let trimmed = string.trimmingCharacters(in: .whitespacesAndNewlines)
+            return Int(trimmed).map(RuntimeValue.int) ?? .null
+        default:
+            return .null
+        }
+    }
+
+    private func castToDecimal(_ value: RuntimeValue) -> RuntimeValue {
+        switch value {
+        case .null:
+            return .null
+        case .decimal(let decimal):
+            return .decimal(decimal)
+        case .int(let int):
+            return .decimal(Decimal(int))
+        case .bool(let bool):
+            return .decimal(bool ? Decimal(1) : .zero)
+        case .string(let string):
+            let trimmed = string.trimmingCharacters(in: .whitespacesAndNewlines)
+            return Decimal(string: trimmed, locale: Locale(identifier: "en_US_POSIX"))
+                .map(RuntimeValue.decimal) ?? .null
+        default:
+            return .null
+        }
+    }
+
+    private func castToString(_ value: RuntimeValue) -> RuntimeValue {
+        switch value {
+        case .null:
+            return .null
+        case .bool(let bool):
+            return .string(bool ? "TRUE" : "FALSE")
+        case .int(let int):
+            return .string(String(int))
+        case .decimal(let decimal):
+            return .string(NSDecimalNumber(decimal: decimal).stringValue)
+        case .amount(let amount):
+            return .string(amount.description)
+        case .position(let position):
+            return .string(position.description)
+        case .inventory(let inventory):
+            return .string(inventory.description)
+        case .directive(let directive):
+            return .string(directive.description.trimmingCharacters(in: .newlines))
+        case .dict(let dictionary):
+            let keys = dictionary.keys.sorted()
+            let rendered = keys.map { key in
+                let renderedValue = castToString(dictionary[key] ?? .null)
+                guard case .string(let stringValue) = renderedValue else {
+                    return "\(key):"
+                }
+                return "\(key):\(stringValue)"
+            }
+            return .string("{\(rendered.joined(separator: ","))}")
+        case .string(let string):
+            return .string(string)
+        case .date(let date):
+            let parts = dateParts(date)
+            return .string(String(format: "%04d-%02d-%02d", parts.year, parts.month, parts.day))
+        case .list(let values):
+            let rendered = values.map { value in
+                let cast = castToString(value)
+                if case .string(let string) = cast {
+                    return string
+                }
+                return "NULL"
+            }
+            return .string(rendered.joined(separator: ","))
         }
     }
 
