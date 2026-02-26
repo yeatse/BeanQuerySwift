@@ -162,4 +162,52 @@ struct BeancountSourceAdapterTests {
         ])
     }
 
+    @Test func makeContextKeepsPostingsAndEntriesLazy() throws {
+        let context = BeancountQueryContextBuilder.makeContext(from: try BeancountTestFixtures.sampleLedger())
+
+        #expect(context.tables["postings"] == nil)
+        #expect(context.tables["entries"] == nil)
+        #expect(context.tables["accounts"] != nil)
+
+        let postings = try engine.run(
+            "SELECT count(*) AS cnt FROM postings",
+            in: context
+        )
+        #expect(postings.columns == ["cnt"])
+        #expect(postings.rows == [[.int(4)]])
+
+        let entries = try engine.run(
+            "SELECT count(*) AS cnt FROM entries",
+            in: context
+        )
+        #expect(entries.columns == ["cnt"])
+        #expect(entries.rows == [[.int(6)]])
+    }
+
+    @Test func runSelectAsteriskIncludesLazyBalanceColumn() throws {
+        let context = BeancountQueryContextBuilder.makeContext(from: try BeancountTestFixtures.sampleLotLedger())
+        let result = try engine.run(
+            "SELECT * FROM postings WHERE account = 'Assets:Brokerage' ORDER BY date",
+            in: context
+        )
+
+        guard let balanceIndex = result.columns.firstIndex(of: "balance") else {
+            Issue.record("expected wildcard columns to contain balance")
+            return
+        }
+
+        #expect(result.rows.count == 2)
+        guard case .inventory(let firstBalance) = result.rows[0][balanceIndex],
+              case .inventory(let secondBalance) = result.rows[1][balanceIndex]
+        else {
+            Issue.record("expected running lot inventory in wildcard balance column")
+            return
+        }
+
+        let expectedFirst: Inventory = "10 VTI {100 USD, 2024-01-15}"
+        let expectedSecond: Inventory = "10 VTI {100 USD, 2024-01-15}, 5 VTI {110 USD, 2024-02-10}"
+        #expect(firstBalance == expectedFirst)
+        #expect(secondBalance == expectedSecond)
+    }
+
 }

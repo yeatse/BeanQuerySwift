@@ -20,45 +20,62 @@ public enum BeancountQueryContextBuilder {
         directives: [Directive<Cost>],
         summarizeConfig: BeancountSummarizeConfig
     ) -> QueryContext {
+        let sortedDirectives = directives.sorted()
         let postingsProvider = BeancountPostingsTableProvider(
-            directives: directives,
+            directives: sortedDirectives,
             summarizeConfig: summarizeConfig
         )
         let entriesProvider = BeancountEntriesTableProvider(
-            directives: directives,
+            directives: sortedDirectives,
             summarizeConfig: summarizeConfig
         )
 
         return QueryContext(
             tables: [
-                "postings": buildPostingsRows(directives: directives),
-                "entries": buildEntriesRows(directives: directives),
-                "accounts": buildAccountsRows(directives: directives),
+                "accounts": buildAccountsRows(directives: sortedDirectives),
             ],
             providers: [
                 "postings": postingsProvider,
                 "entries": entriesProvider,
             ],
-            priceMap: PriceMap.build(from: directives.sorted())
+            priceMap: PriceMap.build(from: sortedDirectives)
         )
     }
 
     fileprivate static func buildPostingsRows(directives: [Directive<Cost>]) -> [QueryRow] {
+        let postingCount = directives.reduce(into: 0) { count, directive in
+            guard case .transaction(let transaction) = directive.content else {
+                return
+            }
+            count += transaction.postings.count
+        }
+
         var rows: [QueryRow] = []
-        var runningBalance = Inventory()
+        rows.reserveCapacity(postingCount)
+
         let calendar = Calendar(identifier: .gregorian)
+        let dateComponents: Set<Calendar.Component> = [.year, .month, .day]
 
         for directive in directives {
             guard case .transaction(let transaction) = directive.content else {
                 continue
             }
 
+            let components = calendar.dateComponents(dateComponents, from: directive.date)
+            let dateValue: RuntimeValue = .date(directive.date)
+            let yearValue: RuntimeValue = .int(components.year ?? 0)
+            let monthValue: RuntimeValue = .int(components.month ?? 0)
+            let dayValue: RuntimeValue = .int(components.day ?? 0)
+            let flagValue = transaction.flag.map { RuntimeValue.string(String($0)) } ?? .null
+            let payeeValue = transaction.payee.map(RuntimeValue.string) ?? .null
+            let narrationValue = transaction.narration.map(RuntimeValue.string) ?? .null
+
             for posting in transaction.postings {
-                var row: QueryRow = [:]
-                row["date"] = .date(directive.date)
-                row["year"] = .int(calendar.component(.year, from: directive.date))
-                row["month"] = .int(calendar.component(.month, from: directive.date))
-                row["day"] = .int(calendar.component(.day, from: directive.date))
+                var row = QueryRow(minimumCapacity: 18)
+                row["date"] = dateValue
+                row["year"] = yearValue
+                row["month"] = monthValue
+                row["day"] = dayValue
 
                 row["account"] = .string(posting.account.id)
                 row["number"] = .decimal(posting.units.number)
@@ -79,12 +96,12 @@ public enum BeancountQueryContextBuilder {
                     row["cost_label"] = .string("")
                 }
 
-                _ = runningBalance.addAmount(posting.units, cost: posting.cost)
-                row["balance"] = .inventory(runningBalance)
+                // Keep wildcard coverage for `balance`, but let QueryExecutor compute it lazily.
+                row["balance"] = .null
 
-                row["flag"] = transaction.flag.map { .string(String($0)) } ?? .null
-                row["payee"] = transaction.payee.map(RuntimeValue.string) ?? .null
-                row["narration"] = transaction.narration.map(RuntimeValue.string) ?? .null
+                row["flag"] = flagValue
+                row["payee"] = payeeValue
+                row["narration"] = narrationValue
 
                 rows.append(row)
             }
@@ -95,16 +112,20 @@ public enum BeancountQueryContextBuilder {
 
     fileprivate static func buildEntriesRows(directives: [Directive<Cost>]) -> [QueryRow] {
         var rows: [QueryRow] = []
+        rows.reserveCapacity(directives.count)
+
         let calendar = Calendar(identifier: .gregorian)
+        let dateComponents: Set<Calendar.Component> = [.year, .month, .day]
 
         for (index, directive) in directives.enumerated() {
-            var row: QueryRow = [:]
+            let components = calendar.dateComponents(dateComponents, from: directive.date)
+            var row = QueryRow(minimumCapacity: 12)
             row["entry"] = .directive(directive)
             row["id"] = .int(index)
             row["date"] = .date(directive.date)
-            row["year"] = .int(calendar.component(.year, from: directive.date))
-            row["month"] = .int(calendar.component(.month, from: directive.date))
-            row["day"] = .int(calendar.component(.day, from: directive.date))
+            row["year"] = .int(components.year ?? 0)
+            row["month"] = .int(components.month ?? 0)
+            row["day"] = .int(components.day ?? 0)
             row["type"] = .string(entryTypeName(directive.content))
 
             switch directive.content {
@@ -255,7 +276,7 @@ private struct BeancountPostingsTableProvider: QueryTableProvider {
 
     func rows(for qualifiers: EvalQualifiers?) throws -> [QueryRow] {
         let transformed = applyBeancountQualifiers(
-            directives.sorted(),
+            directives,
             qualifiers: qualifiers,
             summarizeConfig: summarizeConfig
         )
@@ -269,7 +290,7 @@ private struct BeancountEntriesTableProvider: QueryTableProvider {
 
     func rows(for qualifiers: EvalQualifiers?) throws -> [QueryRow] {
         let transformed = applyBeancountQualifiers(
-            directives.sorted(),
+            directives,
             qualifiers: qualifiers,
             summarizeConfig: summarizeConfig
         )
