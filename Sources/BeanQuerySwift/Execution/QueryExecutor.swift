@@ -480,6 +480,19 @@ struct QueryExecutor {
     ) throws -> RuntimeValue {
         let normalized = name.lowercased()
 
+        if normalized == "coalesce" {
+            guard !args.isEmpty else {
+                throw BQLExecutionError.unsupportedFunction(name)
+            }
+            for arg in args {
+                let value = try evaluateExpression(arg, row: row, group: group, context: context, state: state)
+                if value != .null {
+                    return value
+                }
+            }
+            return .null
+        }
+
         if ["count", "sum", "min", "max", "first", "last"].contains(normalized) {
             guard let group else {
                 throw BQLExecutionError.unsupportedFunction(name)

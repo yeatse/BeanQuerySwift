@@ -297,6 +297,16 @@ struct TypeSystemCoverageTests {
             try checker.validateAndFold(.function(name: "lower", args: [.constant(.string("CASH"))]))
                 == .constant(.string("cash"))
         )
+        #expect(
+            try checker.validateAndFold(
+                .function(name: "coalesce", args: [.constant(.string("left")), .constant(.string("right"))])
+            ) == .constant(.string("left"))
+        )
+        #expect(
+            try checker.validateAndFold(
+                .function(name: "coalesce", args: [.constant(.null), .constant(.null)])
+            ) == .constant(.null)
+        )
     }
 
     @Test func leavesNonFoldableFunctionsAsFunctionExpressions() throws {
@@ -314,6 +324,14 @@ struct TypeSystemCoverageTests {
             .binary(.div, .constant(.integer(1)), .constant(.integer(0)))
         )
         #expect(divByZero == .binary(.div, .constant(.integer(1)), .constant(.integer(0))))
+
+        let coalesceToday = try checker.validateAndFold(
+            .function(name: "coalesce", args: [.function(name: "today", args: []), .function(name: "today", args: [])])
+        )
+        #expect(
+            coalesceToday
+                == .function(name: "coalesce", args: [.function(name: "today", args: []), .function(name: "today", args: [])])
+        )
     }
 
     @Test func invalidExpressionsThrowExpectedErrors() {
@@ -347,6 +365,14 @@ struct TypeSystemCoverageTests {
 
         #expect(throws: BQLCompileError.invalidFunctionSignature(name: "upper", argTypes: [.int])) {
             _ = try checker.validateAndFold(.function(name: "upper", args: [.constant(.integer(1))]))
+        }
+        #expect(throws: BQLCompileError.invalidFunctionSignature(name: "coalesce", argTypes: [.string, .int])) {
+            _ = try checker.validateAndFold(
+                .function(name: "coalesce", args: [.constant(.string("x")), .constant(.integer(1))])
+            )
+        }
+        #expect(throws: BQLCompileError.invalidFunctionSignature(name: "coalesce", argTypes: [])) {
+            _ = try checker.validateAndFold(.function(name: "coalesce", args: []))
         }
 
         #expect(throws: BQLCompileError.invalidUnaryOperator(op: .not, operand: .object)) {

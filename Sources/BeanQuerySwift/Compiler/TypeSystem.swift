@@ -313,6 +313,10 @@ struct ExpressionTypeChecker {
 
         case .function(let name, let args):
             let normalizedArgs = try args.map(normalize)
+            if name.lowercased() == "coalesce" {
+                return try normalizeCoalesce(name: name, args: normalizedArgs)
+            }
+
             let argTypes = normalizedArgs.map(\.type)
             guard let result = functions.lookup(name: name, arguments: argTypes) else {
                 throw BQLCompileError.invalidFunctionSignature(name: name, argTypes: argTypes)
@@ -349,6 +353,32 @@ struct ExpressionTypeChecker {
         case .asterisk:
             return NormalizedExpression(expression: .asterisk, type: .object, constant: nil)
         }
+    }
+
+    private func normalizeCoalesce(
+        name: String,
+        args normalizedArgs: [NormalizedExpression]
+    ) throws -> NormalizedExpression {
+        let argTypes = normalizedArgs.map(\.type)
+        guard let resultType = argTypes.first else {
+            throw BQLCompileError.invalidFunctionSignature(name: name, argTypes: argTypes)
+        }
+
+        guard argTypes.dropFirst().allSatisfy({ $0 == resultType }) else {
+            throw BQLCompileError.invalidFunctionSignature(name: name, argTypes: argTypes)
+        }
+
+        let constants = normalizedArgs.compactMap(\.constant)
+        let folded: BQLLiteral?
+        if constants.count == normalizedArgs.count {
+            folded = constants.first(where: { $0 != .null }) ?? .null
+        } else {
+            folded = nil
+        }
+
+        let normalizedExpression = folded.map(BQLExpression.constant)
+            ?? .function(name: name, args: normalizedArgs.map(\.expression))
+        return NormalizedExpression(expression: normalizedExpression, type: resultType, constant: folded)
     }
 
     private func type(of literal: BQLLiteral) -> BQLType {

@@ -296,6 +296,34 @@ struct BuiltinFunctionExecutionTests {
         #expect(result.rows == [[.string("80 USD")]])
     }
 
+    @Test func runExpenseMonthQueryWithCoalesceFallback() throws {
+        let context = BeancountQueryContextBuilder.makeContext(from: try BeancountTestFixtures.sampleLedger())
+        let result = try engine.run(
+            """
+            SELECT
+              yearmonth(%(date)s) AS month,
+              coalesce(
+                sum(
+                  number(convert(cost(position), 'USD', yearmonth(%(date)s) + interval('1 month') + interval('-1 day')))
+                  * int(
+                      root(account, 1) = 'Expenses'
+                      AND date >= yearmonth(%(date)s)
+                      AND date < yearmonth(%(date)s) + interval('1 month')
+                      AND currency(convert(cost(position), 'USD', yearmonth(%(date)s) + interval('1 month') + interval('-1 day'))) = 'USD'
+                  )
+                ),
+                decimal(0)
+              ) AS expense
+            FROM postings
+            """,
+            parameters: .named(["date": .date(date(2024, 1, 31))]),
+            in: context
+        )
+
+        #expect(result.columns == ["month", "expense"])
+        #expect(result.rows == [[.date(date(2024, 1, 1)), .decimal(Decimal(80))]])
+    }
+
     @Test func runMonthEndNetWorthQueryUsingIntervalArithmetic() throws {
         let context = BeancountQueryContextBuilder.makeContext(from: try BeancountTestFixtures.sampleLotLedger())
         let result = try engine.run(
