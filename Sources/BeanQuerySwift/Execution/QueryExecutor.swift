@@ -154,7 +154,7 @@ struct QueryExecutor {
         case .subquery(let subquery):
             let result = try execute(subquery, context: context)
             return result.rows.map { row in
-                Dictionary(uniqueKeysWithValues: zip(result.columns, row))
+                QueryRow(Dictionary(uniqueKeysWithValues: zip(result.columns, row)))
             }
         }
     }
@@ -215,8 +215,9 @@ struct QueryExecutor {
                 }
             }
 
-            var effectiveRow = row
-            effectiveRow["balance"] = state.resolveBalance(for: row)
+            let effectiveRow = row.overlaying([
+                "balance": state.resolveBalance(for: row)
+            ])
 
             let keyValues = try groupIndexes.map { index in
                 try evaluateExpression(

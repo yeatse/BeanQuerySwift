@@ -16,7 +16,74 @@ public enum RuntimeValue: Hashable, Sendable {
     case null
 }
 
-public typealias QueryRow = [String: RuntimeValue]
+public struct QueryRow: ExpressibleByDictionaryLiteral, Sendable {
+    let storage: QueryRowStorage
+
+    public init(dictionaryLiteral elements: (String, RuntimeValue)...) {
+        self.storage = .dictionary(Dictionary(uniqueKeysWithValues: elements))
+    }
+
+    init(storage: QueryRowStorage) {
+        self.storage = storage
+    }
+
+    init(_ values: [String: RuntimeValue]) {
+        self.storage = .dictionary(values)
+    }
+
+    subscript(_ column: String) -> RuntimeValue? {
+        storage.value(for: column)
+    }
+
+    var columnNames: [String] {
+        storage.columnNames
+    }
+
+    func overlaying(_ overrides: [String: RuntimeValue]) -> QueryRow {
+        guard !overrides.isEmpty else {
+            return self
+        }
+        return QueryRow(storage: .overlay(base: self, overrides: overrides))
+    }
+}
+
+indirect enum QueryRowStorage: Sendable {
+    case dictionary([String: RuntimeValue])
+    case overlay(base: QueryRow, overrides: [String: RuntimeValue])
+    case beancountPosting(BeancountPostingQueryRow)
+    case beancountEntry(BeancountEntryQueryRow)
+    case beancountAccount(BeancountAccountQueryRow)
+
+    func value(for column: String) -> RuntimeValue? {
+        switch self {
+        case .dictionary(let values):
+            return values[column]
+        case .overlay(let base, let overrides):
+            return overrides[column] ?? base[column]
+        case .beancountPosting(let row):
+            return row.value(for: column)
+        case .beancountEntry(let row):
+            return row.value(for: column)
+        case .beancountAccount(let row):
+            return row.value(for: column)
+        }
+    }
+
+    var columnNames: [String] {
+        switch self {
+        case .dictionary(let values):
+            return Array(values.keys)
+        case .overlay(let base, let overrides):
+            return Array(Set(base.columnNames).union(overrides.keys))
+        case .beancountPosting:
+            return BeancountPostingQueryRow.wildcardColumns
+        case .beancountEntry:
+            return BeancountEntryQueryRow.wildcardColumns
+        case .beancountAccount:
+            return BeancountAccountQueryRow.wildcardColumns
+        }
+    }
+}
 
 protocol QueryTableProvider: Sendable {
     func rows(for qualifiers: EvalQualifiers?) throws -> [QueryRow]
@@ -28,7 +95,7 @@ extension QueryTableProvider {
         let rows = try rows(for: qualifiers)
         return rows
             .reduce(into: Set<String>()) { partialResult, row in
-                partialResult.formUnion(row.keys)
+                partialResult.formUnion(row.columnNames)
             }
             .sorted()
     }
@@ -69,7 +136,7 @@ public struct QueryContext: Sendable {
         }
         return rows
             .reduce(into: Set<String>()) { partialResult, row in
-                partialResult.formUnion(row.keys)
+                partialResult.formUnion(row.columnNames)
             }
             .sorted()
     }
