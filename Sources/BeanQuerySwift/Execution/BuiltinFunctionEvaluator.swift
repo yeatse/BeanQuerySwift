@@ -50,6 +50,12 @@ struct BuiltinFunctionEvaluator {
         row: QueryRow?
     ) throws -> RuntimeValue {
         switch normalizedName {
+        case "neg":
+            guard values.count == 1 else {
+                throw BQLExecutionError.unsupportedFunction(name)
+            }
+            return try values[0].negated()
+
         case "abs":
             guard values.count == 1 else {
                 throw BQLExecutionError.unsupportedFunction(name)
@@ -966,23 +972,7 @@ struct BuiltinFunctionEvaluator {
         guard accountSign(account) < 0 else {
             return value
         }
-
-        switch value {
-        case .int(let int):
-            return .int(-int)
-        case .decimal(let decimal):
-            return .decimal(-decimal)
-        case .amount(let amount):
-            return .amount(-amount)
-        case .position(let position):
-            return .position(-position)
-        case .inventory(let inventory):
-            return .inventory(-inventory)
-        case .null:
-            return .null
-        default:
-            throw BQLExecutionError.invalidType
-        }
+        return try value.negated()
     }
 
     private func convertAmount(

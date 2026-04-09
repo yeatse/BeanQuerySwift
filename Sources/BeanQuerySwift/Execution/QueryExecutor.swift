@@ -375,22 +375,7 @@ struct QueryExecutor {
             case .not:
                 return .bool(try !asBool(value))
             case .neg:
-                if let int = asInt(value) {
-                    return .int(-int)
-                }
-                if let decimal = asDecimal(value) {
-                    return .decimal(-decimal)
-                }
-                if let amount = asAmount(value) {
-                    return .amount(-amount)
-                }
-                if let position = asPosition(value) {
-                    return .position(-position)
-                }
-                if let inventory = asInventory(value) {
-                    return .inventory(-inventory)
-                }
-                throw BQLExecutionError.invalidType
+                return try value.negated()
             case .isNull:
                 return .bool(value == .null)
             case .isNotNull:

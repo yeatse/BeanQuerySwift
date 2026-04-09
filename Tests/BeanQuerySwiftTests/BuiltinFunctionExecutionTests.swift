@@ -277,6 +277,30 @@ struct BuiltinFunctionExecutionTests {
         ]])
     }
 
+    @Test func runNegFunctionLikePythonQueryEnv() throws {
+        let context = BeancountQueryContextBuilder.makeContext(from: try BeancountTestFixtures.sampleLedger())
+        let result = try engine.run(
+            """
+            SELECT
+              neg(1.0) AS neg_decimal,
+              neg(NULL) AS neg_null,
+              number(units(neg(position))) AS neg_position,
+              number(neg(convert(position, 'USD'))) AS neg_amount
+            FROM postings
+            WHERE account = 'Income:Salary'
+            """,
+            in: context
+        )
+
+        #expect(result.columns == ["neg_decimal", "neg_null", "neg_position", "neg_amount"])
+        #expect(result.rows == [[
+            .decimal(Decimal(string: "-1.0")!),
+            .null,
+            .decimal(Decimal(1000)),
+            .decimal(Decimal(1000)),
+        ]])
+    }
+
     @Test func runExpenseSumQueryUsingIntBoolCast() throws {
         let context = BeancountQueryContextBuilder.makeContext(from: try BeancountTestFixtures.sampleLedger())
         let result = try engine.run(
@@ -359,6 +383,25 @@ struct BuiltinFunctionExecutionTests {
             return value
         })
         #expect(monthEnds.contains(date(2024, 1, 31)))
+    }
+
+    @Test func runNegFunctionOnPositionInsideConvertAndSum() throws {
+        let context = BeancountQueryContextBuilder.makeContext(from: try BeancountTestFixtures.sampleLotLedger())
+        let result = try engine.run(
+            """
+            SELECT account, sum(convert(neg(position), 'USD')) AS total
+            FROM postings
+            WHERE account ~ 'Assets:Brokerage'
+              AND date >= date_add(2024-12-31, -360)
+            GROUP BY account
+            ORDER BY total DESC
+            """,
+            in: context
+        )
+
+        let expectedTotal: Inventory = "-1800 USD"
+        #expect(result.columns == ["account", "total"])
+        #expect(result.rows == [[.string("Assets:Brokerage"), .inventory(expectedTotal)]])
     }
 
     @Test func runDateIntervalOperatorsLikePythonBeanQuery() throws {

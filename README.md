@@ -46,7 +46,7 @@ Selected builtin function groups (aligned with Python `query_env.py` scope alrea
 
 - Date/time: `date`, `parse_date`, `today`, `date_diff`, `date_add`, `date_trunc`, `date_part`, `interval`, `date_bin`
 - Account operations: `root`, `parent`, `leaf`, `grep`, `grepn`, `subst`, `upper`, `lower`, `open_date`, `close_date`, `open_meta`, `account_sortkey`, `has_account`, `findfirst`, `joinstr`
-- Inventory/amount/position: `units`, `cost`, `weight`, `convert`, `value`, `getprice`, `number`, `currency`/`commodity`, `only`, `empty`, `filter_currency`, `possign`
+- Inventory/amount/position: `neg`, `units`, `cost`, `weight`, `convert`, `value`, `getprice`, `number`, `currency`/`commodity`, `only`, `empty`, `filter_currency`, `possign`
 
 Date/interval arithmetic now supports Python-like behavior for:
 

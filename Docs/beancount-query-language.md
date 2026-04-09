@@ -82,6 +82,8 @@ The `position` column is a composite object. These functions let you extract spe
 ```sql
 -- Extract just the number and currency from a position
 SELECT UNITS(position)
+-- Negate a position or aggregated inventory before further conversion/math
+SELECT NEG(position)
 -- Show the total cost of a position
 SELECT COST(position)
 -- Show the position converted to its cost basis (useful for investments)

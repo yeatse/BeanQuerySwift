@@ -51,6 +51,10 @@ private struct FunctionRegistry {
         FunctionSignature(name: "last", arguments: [.object], result: .object),
         FunctionSignature(name: "min", arguments: [.object], result: .object),
         FunctionSignature(name: "max", arguments: [.object], result: .object),
+        FunctionSignature(name: "neg", arguments: [.int], result: .int),
+        FunctionSignature(name: "neg", arguments: [.decimal], result: .decimal),
+        FunctionSignature(name: "neg", arguments: [.null], result: .null),
+        FunctionSignature(name: "neg", arguments: [.object], result: .object),
         FunctionSignature(name: "abs", arguments: [.object], result: .object),
         FunctionSignature(name: "units", arguments: [.object], result: .object),
         FunctionSignature(name: "cost", arguments: [.object], result: .object),
@@ -495,6 +499,17 @@ struct ExpressionTypeChecker {
         guard args.count == expectedCount else { return nil }
 
         switch name.lowercased() {
+        case "neg":
+            switch args[0] {
+            case .integer(let value):
+                return .integer(-value)
+            case .decimal(let value):
+                return .decimal(-value)
+            case .null:
+                return .null
+            default:
+                return nil
+            }
         case "units", "cost", "weight":
             return args.first
         case "account_sortkey":
