@@ -73,6 +73,26 @@ enum BeancountTestFixtures {
         """)
         return try Loader.load(file: "test-account-functions.bean", contentProvider: provider)
     }
+
+    static func sampleBudgetSearchLedger() throws -> ParsedLedger<Cost> {
+        let provider = StringContentProvider(source: """
+        option "operating_currency" "CNY"
+
+        2024-01-01 open Assets:Cash CNY
+        2024-01-01 open Expenses:Plan CNY
+
+        2024-01-05 * "Planner" "Budget 2024"
+          budget: "annual"
+          Assets:Cash     -100 CNY
+          Expenses:Plan    100 CNY
+
+        2024-01-06 * "Planner" "目标储蓄"
+          Assets:Cash      -50 CNY
+            budget: "savings"
+          Expenses:Plan     50 CNY
+        """)
+        return try Loader.load(file: "test-budget-search.bean", contentProvider: provider)
+    }
 }
 
 private struct StringContentProvider: ContentProviding {

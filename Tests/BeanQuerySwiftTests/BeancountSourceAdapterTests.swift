@@ -210,4 +210,38 @@ struct BeancountSourceAdapterTests {
         #expect(secondBalance == expectedSecond)
     }
 
+    @Test func runBudgetSearchQueriesLikeBeanQuery() throws {
+        let context = BeancountQueryContextBuilder.makeContext(from: try BeancountTestFixtures.sampleBudgetSearchLedger())
+
+        let descriptionResult = try engine.run(
+            "SELECT DISTINCT description FROM description ~ '预算|budget|Budget|目标|goal' ORDER BY description LIMIT 20",
+            in: context
+        )
+        #expect(descriptionResult.columns == ["description"])
+        #expect(descriptionResult.rows == [
+            [.string("Planner | Budget 2024")],
+            [.string("Planner | 目标储蓄")],
+        ])
+
+        let narrationResult = try engine.run(
+            "SELECT DISTINCT narration WHERE narration ~ '预算|budget|Budget|目标|goal' ORDER BY narration LIMIT 20",
+            in: context
+        )
+        #expect(narrationResult.columns == ["narration"])
+        #expect(narrationResult.rows == [
+            [.string("Budget 2024")],
+            [.string("目标储蓄")],
+        ])
+
+        let budgetMetaResult = try engine.run(
+            "SELECT DISTINCT str(any_meta('budget')) AS budget_meta WHERE str(any_meta('budget')) != 'None' GROUP BY str(any_meta('budget')) ORDER BY budget_meta LIMIT 20",
+            in: context
+        )
+        #expect(budgetMetaResult.columns == ["budget_meta"])
+        #expect(budgetMetaResult.rows == [
+            [.string("annual")],
+            [.string("savings")],
+        ])
+    }
+
 }

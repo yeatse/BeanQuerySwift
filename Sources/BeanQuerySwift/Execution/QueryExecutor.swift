@@ -407,6 +407,9 @@ struct QueryExecutor {
             let value = try evaluateExpression(valueExpr, row: row, group: group, context: context, state: state)
             let lower = try evaluateExpression(lowerExpr, row: row, group: group, context: context, state: state)
             let upper = try evaluateExpression(upperExpr, row: row, group: group, context: context, state: state)
+            guard value != .null, lower != .null, upper != .null else {
+                return .null
+            }
             let lowerCmp = compare(value, lower)
             let upperCmp = compare(value, upper)
             return .bool((lowerCmp == .orderedSame || lowerCmp == .orderedDescending)
@@ -415,6 +418,9 @@ struct QueryExecutor {
         case .anyAll(let op, let quantifier, let leftExpr, let rightExpr):
             let left = try evaluateExpression(leftExpr, row: row, group: group, context: context, state: state)
             let right = try evaluateExpression(rightExpr, row: row, group: group, context: context, state: state)
+            guard left != .null, right != .null else {
+                return .null
+            }
             guard case .list(let values) = right else {
                 throw BQLExecutionError.invalidType
             }
@@ -563,6 +569,10 @@ struct QueryExecutor {
     }
 
     private func evaluateBinary(op: BQLBinaryOperator, left: RuntimeValue, right: RuntimeValue) throws -> RuntimeValue {
+        guard left != .null, right != .null else {
+            return .null
+        }
+
         switch op {
         case .add:
             if let lhsDate = asDate(left), let rhsStride = asDateStride(right) {

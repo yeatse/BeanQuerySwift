@@ -69,9 +69,14 @@ public enum BeancountQueryContextBuilder {
             let flagValue = transaction.flag.map { RuntimeValue.string(String($0)) } ?? .null
             let payeeValue = transaction.payee.map(RuntimeValue.string) ?? .null
             let narrationValue = transaction.narration.map(RuntimeValue.string) ?? .null
+            let descriptionValue = descriptionValue(
+                payee: transaction.payee,
+                narration: transaction.narration
+            )
+            let entryMetaValue: RuntimeValue = .dict(runtimeMetaDictionary(from: directive.meta))
 
             for posting in transaction.postings {
-                var row = QueryRow(minimumCapacity: 18)
+                var row = QueryRow(minimumCapacity: 21)
                 row["date"] = dateValue
                 row["year"] = yearValue
                 row["month"] = monthValue
@@ -102,6 +107,9 @@ public enum BeancountQueryContextBuilder {
                 row["flag"] = flagValue
                 row["payee"] = payeeValue
                 row["narration"] = narrationValue
+                row["description"] = descriptionValue
+                row["meta"] = posting.meta.map { .dict(runtimeMetaDictionary(from: $0)) } ?? .null
+                row["entry_meta"] = entryMetaValue
 
                 rows.append(row)
             }
@@ -119,7 +127,7 @@ public enum BeancountQueryContextBuilder {
 
         for (index, directive) in directives.enumerated() {
             let components = calendar.dateComponents(dateComponents, from: directive.date)
-            var row = QueryRow(minimumCapacity: 12)
+            var row = QueryRow(minimumCapacity: 14)
             row["entry"] = .directive(directive)
             row["id"] = .int(index)
             row["date"] = .date(directive.date)
@@ -127,12 +135,18 @@ public enum BeancountQueryContextBuilder {
             row["month"] = .int(components.month ?? 0)
             row["day"] = .int(components.day ?? 0)
             row["type"] = .string(entryTypeName(directive.content))
+            row["meta"] = .dict(runtimeMetaDictionary(from: directive.meta))
+            row["entry_meta"] = row["meta"] ?? .null
 
             switch directive.content {
             case .transaction(let transaction):
                 row["flag"] = transaction.flag.map { .string(String($0)) } ?? .null
                 row["payee"] = transaction.payee.map(RuntimeValue.string) ?? .null
                 row["narration"] = transaction.narration.map(RuntimeValue.string) ?? .null
+                row["description"] = descriptionValue(
+                    payee: transaction.payee,
+                    narration: transaction.narration
+                )
                 row["accounts"] = .list(transaction.postings.map { .string($0.account.id) })
             case .open(let open):
                 row["account"] = .string(open.account.id)
@@ -153,6 +167,7 @@ public enum BeancountQueryContextBuilder {
             if row["flag"] == nil { row["flag"] = .null }
             if row["payee"] == nil { row["payee"] = .null }
             if row["narration"] == nil { row["narration"] = .null }
+            if row["description"] == nil { row["description"] = .null }
             if row["account"] == nil { row["account"] = .null }
             if row["accounts"] == nil { row["accounts"] = .null }
 
@@ -224,6 +239,16 @@ public enum BeancountQueryContextBuilder {
     private static func accountTypeName(_ account: String) -> String {
         let root = account.split(separator: ":").first.map(String.init) ?? account
         return root.lowercased()
+    }
+
+    private static func descriptionValue(payee: String?, narration: String?) -> RuntimeValue {
+        let parts = [payee, narration].compactMap { value -> String? in
+            guard let value, !value.isEmpty else {
+                return nil
+            }
+            return value
+        }
+        return .string(parts.joined(separator: " | "))
     }
 
     private static func runtimeMetaDictionary(from metadata: MetaData) -> [String: RuntimeValue] {

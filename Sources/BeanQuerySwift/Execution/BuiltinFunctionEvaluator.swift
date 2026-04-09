@@ -487,6 +487,47 @@ struct BuiltinFunctionEvaluator {
             }
             return metadata[key] ?? .null
 
+        case "meta":
+            guard values.count == 1 else {
+                throw BQLExecutionError.unsupportedFunction(name)
+            }
+            if values[0] == .null {
+                return .null
+            }
+            guard case .string(let key) = values[0] else {
+                throw BQLExecutionError.invalidType
+            }
+            return metadataValue(row: row, column: "meta", key: key)
+
+        case "entry_meta":
+            guard values.count == 1 else {
+                throw BQLExecutionError.unsupportedFunction(name)
+            }
+            if values[0] == .null {
+                return .null
+            }
+            guard case .string(let key) = values[0] else {
+                throw BQLExecutionError.invalidType
+            }
+            return metadataValue(row: row, column: "entry_meta", key: key)
+
+        case "any_meta":
+            guard values.count == 1 else {
+                throw BQLExecutionError.unsupportedFunction(name)
+            }
+            if values[0] == .null {
+                return .null
+            }
+            guard case .string(let key) = values[0] else {
+                throw BQLExecutionError.invalidType
+            }
+
+            let postingValue = metadataValue(row: row, column: "meta", key: key)
+            if postingValue != .null {
+                return postingValue
+            }
+            return metadataValue(row: row, column: "entry_meta", key: key)
+
         case "account_sortkey":
             guard values.count == 1 else {
                 throw BQLExecutionError.unsupportedFunction(name)
@@ -782,6 +823,15 @@ struct BuiltinFunctionEvaluator {
             }
             return .string(rendered.joined(separator: ","))
         }
+    }
+
+    private func metadataValue(row: QueryRow?, column: String, key: String) -> RuntimeValue {
+        guard let row,
+              case .dict(let metadata) = row[column] ?? .null
+        else {
+            return .null
+        }
+        return metadata[key] ?? .null
     }
 
     private func units(_ value: RuntimeValue) throws -> RuntimeValue {
