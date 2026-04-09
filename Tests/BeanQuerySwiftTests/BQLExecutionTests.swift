@@ -6,6 +6,39 @@ import Testing
 struct BQLExecutionTests {
     private let engine = BeanQueryEngine()
 
+    private final class RowCounter: @unchecked Sendable {
+        var yielded = 0
+    }
+
+    private struct StreamingProvider: QueryTableProvider {
+        let counter: RowCounter
+
+        func rows(for qualifiers: EvalQualifiers?) throws -> QueryRowSequence {
+            QueryRowSequence(makeIterator: {
+                var index = 0
+                return AnyIterator {
+                    guard index < 10 else {
+                        return nil
+                    }
+
+                    defer {
+                        index += 1
+                        counter.yielded += 1
+                    }
+
+                    return [
+                        "number": .int(index),
+                        "account": .string(index.isMultiple(of: 2) ? "Assets:Cash" : "Assets:Bank"),
+                    ]
+                }
+            })
+        }
+
+        func wildcardColumns(for qualifiers: EvalQualifiers?) throws -> [String] {
+            ["account", "number"]
+        }
+    }
+
     private func date(_ year: Int, _ month: Int, _ day: Int) -> Date {
         Calendar(identifier: .gregorian).date(
             from: DateComponents(year: year, month: month, day: day)
@@ -203,5 +236,25 @@ struct BQLExecutionTests {
             [.string("Assets:Bank"), .int(3), .int(7)],
             [.string("Assets:Cash"), .null, .int(15)],
         ])
+    }
+
+    @Test func runSimpleLimitQueryStopsStreamingProviderEarly() throws {
+        let counter = RowCounter()
+        let context = QueryContext(
+            providers: ["postings": StreamingProvider(counter: counter)],
+            priceMap: nil
+        )
+
+        let result = try engine.run(
+            "SELECT number FROM postings WHERE account = 'Assets:Cash' LIMIT 2",
+            in: context
+        )
+
+        #expect(result.columns == ["number"])
+        #expect(result.rows == [
+            [.int(0)],
+            [.int(2)],
+        ])
+        #expect(counter.yielded == 3)
     }
 }

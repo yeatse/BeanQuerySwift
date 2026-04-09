@@ -7,8 +7,26 @@ struct QueryModelsCoverageTests {
     private struct StaticProvider: QueryTableProvider {
         let value: [QueryRow]
 
-        func rows(for qualifiers: EvalQualifiers?) throws -> [QueryRow] {
-            value
+        func rows(for qualifiers: EvalQualifiers?) throws -> QueryRowSequence {
+            QueryRowSequence(value)
+        }
+    }
+
+    private struct StreamingProvider: QueryTableProvider {
+        func rows(for qualifiers: EvalQualifiers?) throws -> QueryRowSequence {
+            QueryRowSequence(makeIterator: {
+                var index = 0
+                return AnyIterator {
+                    guard index < 2 else {
+                        return nil
+                    }
+                    defer { index += 1 }
+                    if index == 0 {
+                        return ["z": .int(1), "a": .int(2)]
+                    }
+                    return ["m": .int(3)]
+                }
+            })
         }
     }
 
@@ -19,6 +37,11 @@ struct QueryModelsCoverageTests {
         ])
 
         let columns = try provider.wildcardColumns(for: nil)
+        #expect(columns == ["a", "m", "z"])
+    }
+
+    @Test func queryTableProviderDefaultWildcardColumnsSupportsStreamingRows() throws {
+        let columns = try StreamingProvider().wildcardColumns(for: nil)
         #expect(columns == ["a", "m", "z"])
     }
 

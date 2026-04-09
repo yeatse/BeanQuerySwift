@@ -69,13 +69,23 @@ struct QueryExecutor {
     }
 
     func execute(_ query: EvalQuery, context: QueryContext) throws -> QueryResult {
-        let sourceRows = try loadSourceRows(query.source, context: context)
-        let fullRows = try evaluateRows(query: query, rows: sourceRows, context: context)
-
         let visible = query.targets.enumerated().compactMap { index, target in
             target.name == nil ? nil : (index, target.name!)
         }
-        var columns = visible.map(\.1)
+        let sourceRows = try loadSourceRows(query.source, context: context)
+        let columns = visible.map(\.1)
+
+        if canStreamProjectedRows(query) {
+            let projectedRows = try evaluateVisibleRows(
+                query: query,
+                rows: sourceRows,
+                visibleIndexes: visible.map(\.0),
+                context: context
+            )
+            return QueryResult(columns: columns, rows: projectedRows)
+        }
+
+        let fullRows = try evaluateRows(query: query, rows: sourceRows, context: context)
         var projectedRows = fullRows.map { row in
             visible.map { row[$0.0] }
         }
@@ -105,14 +115,23 @@ struct QueryExecutor {
                 firstColumn: first,
                 secondColumn: second
             )
+            var columns = columns
             columns = pivoted.columns
             projectedRows = pivoted.rows
+            return QueryResult(columns: columns, rows: projectedRows)
         }
 
         return QueryResult(columns: columns, rows: projectedRows)
     }
 
-    private func loadSourceRows(_ source: EvalSource, context: QueryContext) throws -> [QueryRow] {
+    private func canStreamProjectedRows(_ query: EvalQuery) -> Bool {
+        query.groupIndexes == nil
+            && query.orderSpec == nil
+            && !query.distinct
+            && query.pivotIndexes == nil
+    }
+
+    private func loadSourceRows(_ source: EvalSource, context: QueryContext) throws -> QueryRowSequence {
         switch source.table {
         case .named(let name):
             if let provider = context.provider(named: name) {
@@ -127,7 +146,7 @@ struct QueryExecutor {
                 throw BQLExecutionError.qualifiersUnsupported(name)
             }
 
-            return rows
+            return QueryRowSequence(rows)
 
         case .hash(let name):
             if let name {
@@ -143,25 +162,27 @@ struct QueryExecutor {
                     throw BQLExecutionError.qualifiersUnsupported(name)
                 }
 
-                return rows
+                return QueryRowSequence(rows)
             }
 
             guard source.qualifiers == nil else {
                 throw BQLExecutionError.qualifiersUnsupported("#")
             }
-            return [[:]]
+            return QueryRowSequence([[:]])
 
         case .subquery(let subquery):
             let result = try execute(subquery, context: context)
-            return result.rows.map { row in
-                QueryRow(Dictionary(uniqueKeysWithValues: zip(result.columns, row)))
-            }
+            return QueryRowSequence(
+                result.rows.lazy.map { row in
+                    QueryRow(Dictionary(uniqueKeysWithValues: zip(result.columns, row)))
+                }
+            )
         }
     }
 
     private func evaluateRows(
         query: EvalQuery,
-        rows: [QueryRow],
+        rows: QueryRowSequence,
         context: QueryContext
     ) throws -> [[RuntimeValue]] {
         if query.groupIndexes == nil {
@@ -255,6 +276,56 @@ struct QueryExecutor {
         }
 
         return applyOrdering(output, orderSpec: query.orderSpec)
+    }
+
+    private func evaluateVisibleRows(
+        query: EvalQuery,
+        rows: QueryRowSequence,
+        visibleIndexes: [Int],
+        context: QueryContext
+    ) throws -> [[RuntimeValue]] {
+        if query.limit == 0 {
+            return []
+        }
+
+        var output: [[RuntimeValue]] = []
+        if let limit = query.limit {
+            output.reserveCapacity(limit)
+        }
+
+        let state = EvaluationState()
+        for row in rows {
+            state.beginRow()
+
+            if let filter = query.filter {
+                guard try evaluateBoolean(
+                    filter,
+                    row: row,
+                    group: nil,
+                    context: context,
+                    state: state
+                ) else {
+                    continue
+                }
+            }
+
+            let values = try visibleIndexes.map { index in
+                try evaluateExpression(
+                    query.targets[index].expression,
+                    row: row,
+                    group: nil,
+                    context: context,
+                    state: state
+                )
+            }
+            output.append(values)
+
+            if let limit = query.limit, output.count >= limit {
+                break
+            }
+        }
+
+        return output
     }
 
     private func applyOrdering(_ rows: [[RuntimeValue]], orderSpec: [EvalOrderSpec]?) -> [[RuntimeValue]] {

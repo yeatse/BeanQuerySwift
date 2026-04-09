@@ -47,6 +47,27 @@ public struct QueryRow: ExpressibleByDictionaryLiteral, Sendable {
     }
 }
 
+struct QueryRowSequence: Sequence {
+    private let makeIteratorImpl: () -> AnyIterator<QueryRow>
+
+    init(makeIterator: @escaping () -> AnyIterator<QueryRow>) {
+        self.makeIteratorImpl = makeIterator
+    }
+
+    init<S>(_ base: S) where S: Sequence, S.Element == QueryRow {
+        self.makeIteratorImpl = {
+            var iterator = base.makeIterator()
+            return AnyIterator {
+                iterator.next()
+            }
+        }
+    }
+
+    func makeIterator() -> AnyIterator<QueryRow> {
+        makeIteratorImpl()
+    }
+}
+
 indirect enum QueryRowStorage: Sendable {
     case dictionary([String: RuntimeValue])
     case overlay(base: QueryRow, overrides: [String: RuntimeValue])
@@ -86,14 +107,13 @@ indirect enum QueryRowStorage: Sendable {
 }
 
 protocol QueryTableProvider: Sendable {
-    func rows(for qualifiers: EvalQualifiers?) throws -> [QueryRow]
+    func rows(for qualifiers: EvalQualifiers?) throws -> QueryRowSequence
     func wildcardColumns(for qualifiers: EvalQualifiers?) throws -> [String]
 }
 
 extension QueryTableProvider {
     func wildcardColumns(for qualifiers: EvalQualifiers?) throws -> [String] {
-        let rows = try rows(for: qualifiers)
-        return rows
+        try rows(for: qualifiers)
             .reduce(into: Set<String>()) { partialResult, row in
                 partialResult.formUnion(row.columnNames)
             }

@@ -42,74 +42,95 @@ public enum BeancountQueryContextBuilder {
         )
     }
 
-    fileprivate static func buildPostingsRows(directives: [Directive<Cost>]) -> [QueryRow] {
-        let postingCount = directives.reduce(into: 0) { count, directive in
-            guard case .transaction(let transaction) = directive.content else {
-                return
-            }
-            count += transaction.postings.count
-        }
+    fileprivate static func postingsRowSequence(directives: [Directive<Cost>]) -> QueryRowSequence {
+        QueryRowSequence(makeIterator: {
+            var directiveIndex = 0
+            var postingIndex = 0
+            var currentDirectiveContext: PostingDirectiveContext?
+            let calendar = Calendar(identifier: .gregorian)
+            let dateComponents: Set<Calendar.Component> = [.year, .month, .day]
 
-        var rows: [QueryRow] = []
-        rows.reserveCapacity(postingCount)
+            return AnyIterator {
+                while directiveIndex < directives.count {
+                    if currentDirectiveContext == nil {
+                        let directive = directives[directiveIndex]
+                        guard case .transaction(let transaction) = directive.content else {
+                            directiveIndex += 1
+                            continue
+                        }
 
-        let calendar = Calendar(identifier: .gregorian)
-        let dateComponents: Set<Calendar.Component> = [.year, .month, .day]
+                        let components = calendar.dateComponents(dateComponents, from: directive.date)
+                        currentDirectiveContext = PostingDirectiveContext(
+                            directive: directive,
+                            transaction: transaction,
+                            year: components.year ?? 0,
+                            month: components.month ?? 0,
+                            day: components.day ?? 0,
+                            flag: transaction.flag.map { RuntimeValue.string(String($0)) } ?? .null,
+                            payee: transaction.payee.map(RuntimeValue.string) ?? .null,
+                            narration: transaction.narration.map(RuntimeValue.string) ?? .null,
+                            description: descriptionValue(
+                                payee: transaction.payee,
+                                narration: transaction.narration
+                            ),
+                            entryMeta: .dict(runtimeMetaDictionary(from: directive.meta))
+                        )
+                        postingIndex = 0
+                    }
 
-        for directive in directives {
-            guard case .transaction(let transaction) = directive.content else {
-                continue
-            }
+                    guard let directiveContext = currentDirectiveContext else {
+                        continue
+                    }
 
-            let components = calendar.dateComponents(dateComponents, from: directive.date)
-            let flagValue = transaction.flag.map { RuntimeValue.string(String($0)) } ?? .null
-            let payeeValue = transaction.payee.map(RuntimeValue.string) ?? .null
-            let narrationValue = transaction.narration.map(RuntimeValue.string) ?? .null
-            let descriptionValue = descriptionValue(
-                payee: transaction.payee,
-                narration: transaction.narration
-            )
-            let entryMetaValue: RuntimeValue = .dict(runtimeMetaDictionary(from: directive.meta))
-
-            for posting in transaction.postings {
-                rows.append(
-                    QueryRow(
-                        storage: .beancountPosting(
-                            BeancountPostingQueryRow(
-                                date: directive.date,
-                                year: components.year ?? 0,
-                                month: components.month ?? 0,
-                                day: components.day ?? 0,
-                                posting: posting,
-                                position: Position(posting: posting),
-                                flag: flagValue,
-                                payee: payeeValue,
-                                narration: narrationValue,
-                                description: descriptionValue,
-                                meta: posting.meta.map { .dict(runtimeMetaDictionary(from: $0)) } ?? .null,
-                                entryMeta: entryMetaValue
+                    if postingIndex < directiveContext.transaction.postings.count {
+                        let posting = directiveContext.transaction.postings[postingIndex]
+                        postingIndex += 1
+                        return QueryRow(
+                            storage: .beancountPosting(
+                                BeancountPostingQueryRow(
+                                    date: directiveContext.directive.date,
+                                    year: directiveContext.year,
+                                    month: directiveContext.month,
+                                    day: directiveContext.day,
+                                    posting: posting,
+                                    position: Position(posting: posting),
+                                    flag: directiveContext.flag,
+                                    payee: directiveContext.payee,
+                                    narration: directiveContext.narration,
+                                    description: directiveContext.description,
+                                    meta: posting.meta.map { .dict(runtimeMetaDictionary(from: $0)) } ?? .null,
+                                    entryMeta: directiveContext.entryMeta
+                                )
                             )
                         )
-                    )
-                )
-            }
-        }
+                    }
 
-        return rows
+                    currentDirectiveContext = nil
+                    directiveIndex += 1
+                }
+
+                return nil
+            }
+        })
     }
 
-    fileprivate static func buildEntriesRows(directives: [Directive<Cost>]) -> [QueryRow] {
-        var rows: [QueryRow] = []
-        rows.reserveCapacity(directives.count)
+    fileprivate static func entriesRowSequence(directives: [Directive<Cost>]) -> QueryRowSequence {
+        QueryRowSequence(makeIterator: {
+            var index = 0
+            let calendar = Calendar(identifier: .gregorian)
+            let dateComponents: Set<Calendar.Component> = [.year, .month, .day]
 
-        let calendar = Calendar(identifier: .gregorian)
-        let dateComponents: Set<Calendar.Component> = [.year, .month, .day]
+            return AnyIterator {
+                guard index < directives.count else {
+                    return nil
+                }
 
-        for (index, directive) in directives.enumerated() {
-            let components = calendar.dateComponents(dateComponents, from: directive.date)
-            let metaValue: RuntimeValue = .dict(runtimeMetaDictionary(from: directive.meta))
-            rows.append(
-                QueryRow(
+                let directive = directives[index]
+                defer { index += 1 }
+
+                let components = calendar.dateComponents(dateComponents, from: directive.date)
+                let metaValue: RuntimeValue = .dict(runtimeMetaDictionary(from: directive.meta))
+                return QueryRow(
                     storage: .beancountEntry(
                         BeancountEntryQueryRow(
                             directive: directive,
@@ -130,10 +151,8 @@ public enum BeancountQueryContextBuilder {
                         )
                     )
                 )
-            )
-        }
-
-        return rows
+            }
+        })
     }
 
     fileprivate static func buildAccountsRows(directives: [Directive<Cost>]) -> [QueryRow] {
@@ -256,6 +275,19 @@ public enum BeancountQueryContextBuilder {
         let intValue = NSDecimalNumber(decimal: decimal).intValue
         return Decimal(intValue) == decimal ? intValue : nil
     }
+}
+
+private struct PostingDirectiveContext {
+    let directive: Directive<Cost>
+    let transaction: Transaction<Cost>
+    let year: Int
+    let month: Int
+    let day: Int
+    let flag: RuntimeValue
+    let payee: RuntimeValue
+    let narration: RuntimeValue
+    let description: RuntimeValue
+    let entryMeta: RuntimeValue
 }
 
 struct BeancountPostingQueryRow: Sendable {
@@ -480,13 +512,13 @@ private struct BeancountPostingsTableProvider: QueryTableProvider {
     var directives: [Directive<Cost>]
     var summarizeConfig: BeancountSummarizeConfig
 
-    func rows(for qualifiers: EvalQualifiers?) throws -> [QueryRow] {
+    func rows(for qualifiers: EvalQualifiers?) throws -> QueryRowSequence {
         let transformed = applyBeancountQualifiers(
             directives,
             qualifiers: qualifiers,
             summarizeConfig: summarizeConfig
         )
-        return BeancountQueryContextBuilder.buildPostingsRows(directives: transformed)
+        return BeancountQueryContextBuilder.postingsRowSequence(directives: transformed)
     }
 
     func wildcardColumns(for qualifiers: EvalQualifiers?) throws -> [String] {
@@ -498,13 +530,13 @@ private struct BeancountEntriesTableProvider: QueryTableProvider {
     var directives: [Directive<Cost>]
     var summarizeConfig: BeancountSummarizeConfig
 
-    func rows(for qualifiers: EvalQualifiers?) throws -> [QueryRow] {
+    func rows(for qualifiers: EvalQualifiers?) throws -> QueryRowSequence {
         let transformed = applyBeancountQualifiers(
             directives,
             qualifiers: qualifiers,
             summarizeConfig: summarizeConfig
         )
-        return BeancountQueryContextBuilder.buildEntriesRows(directives: transformed)
+        return BeancountQueryContextBuilder.entriesRowSequence(directives: transformed)
     }
 
     func wildcardColumns(for qualifiers: EvalQualifiers?) throws -> [String] {
