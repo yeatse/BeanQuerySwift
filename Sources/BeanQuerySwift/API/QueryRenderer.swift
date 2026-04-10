@@ -625,7 +625,7 @@ private enum QueryRendererImpl {
     }
 
     private static func stringify(_ value: RuntimeValue) -> String {
-        value.description
+        value.stringRepresentation()
     }
 
     private static func inventoryLines(

@@ -1,7 +1,7 @@
 import Foundation
 import BeancountSwift
 
-public enum RuntimeValue: Hashable, Sendable, CustomStringConvertible {
+public enum RuntimeValue: Hashable, Sendable {
     case int(Int)
     case decimal(Decimal)
     case amount(Amount)
@@ -15,7 +15,17 @@ public enum RuntimeValue: Hashable, Sendable, CustomStringConvertible {
     case list([RuntimeValue])
     case null
 
-    public var description: String {
+    private static func formatDate(_ date: Date) -> String {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone.current
+        let parts = calendar.dateComponents([.year, .month, .day], from: date)
+        let year = parts.year ?? 0
+        let month = parts.month ?? 0
+        let day = parts.day ?? 0
+        return String(format: "%04d-%02d-%02d", year, month, day)
+    }
+    
+    public func stringRepresentation(placeholder: String = "") -> String {
         switch self {
         case .int(let number):
             return String(number)
@@ -31,7 +41,7 @@ public enum RuntimeValue: Hashable, Sendable, CustomStringConvertible {
             return directive.description.trimmingCharacters(in: .newlines)
         case .dict(let dictionary):
             let parts = dictionary.keys.sorted().map { key -> String in
-                "\(key):\(dictionary[key, default: .null].description)"
+                "\(key):\(dictionary[key, default: .null].stringRepresentation(placeholder: placeholder))"
             }
             return "{\(parts.joined(separator: ","))}"
         case .string(let text):
@@ -41,20 +51,10 @@ public enum RuntimeValue: Hashable, Sendable, CustomStringConvertible {
         case .date(let date):
             return Self.formatDate(date)
         case .list(let values):
-            return values.map(\.description).joined(separator: ", ")
+            return values.map { $0.stringRepresentation(placeholder: placeholder) }.joined(separator: ", ")
         case .null:
-            return ""
+            return placeholder
         }
-    }
-
-    private static func formatDate(_ date: Date) -> String {
-        var calendar = Calendar(identifier: .gregorian)
-        calendar.timeZone = TimeZone.current
-        let parts = calendar.dateComponents([.year, .month, .day], from: date)
-        let year = parts.year ?? 0
-        let month = parts.month ?? 0
-        let day = parts.day ?? 0
-        return String(format: "%04d-%02d-%02d", year, month, day)
     }
 }
 

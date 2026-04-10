@@ -101,11 +101,12 @@ struct QueryRendererTests {
             FALSE
             """ + "\n"
         )
-        #expect(RuntimeValue.bool(true).description == "TRUE")
-        #expect(RuntimeValue.date(date).description == "2026-04-10")
-        #expect(RuntimeValue.dict(["b": .null, "a": .int(1)]).description == "{a:1,b:}")
-        #expect(RuntimeValue.list([.string("USD"), .bool(false)]).description == "USD, FALSE")
-        #expect(RuntimeValue.null.description.isEmpty)
+        #expect(RuntimeValue.bool(true).stringRepresentation() == "TRUE")
+        #expect(RuntimeValue.date(date).stringRepresentation() == "2026-04-10")
+        #expect(RuntimeValue.dict(["b": .null, "a": .int(1)]).stringRepresentation() == "{a:1,b:}")
+        #expect(RuntimeValue.list([.string("USD"), .bool(false)]).stringRepresentation() == "USD, FALSE")
+        #expect(RuntimeValue.null.stringRepresentation().isEmpty)
+        #expect(RuntimeValue.null.stringRepresentation(placeholder: "--") == "--")
     }
 
     @Test func renderBeancountUsesDirectiveValues() throws {
