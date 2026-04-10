@@ -18,7 +18,7 @@ enum BeancountTestFixtures {
           Income:Salary   -1000 USD
 
         2024-01-12 * "Store" "Groceries" #food #groceries ^receipt
-          Expenses:Food      80 USD
+          ! Expenses:Food      80 USD
           Assets:Cash       -80 USD
 
         2024-01-20 close Expenses:Food

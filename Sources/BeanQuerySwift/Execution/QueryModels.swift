@@ -1,7 +1,7 @@
 import Foundation
 import BeancountSwift
 
-public enum RuntimeValue: Hashable, Sendable {
+public enum RuntimeValue: Hashable, Sendable, CustomStringConvertible {
     case int(Int)
     case decimal(Decimal)
     case amount(Amount)
@@ -14,6 +14,48 @@ public enum RuntimeValue: Hashable, Sendable {
     case date(Date)
     case list([RuntimeValue])
     case null
+
+    public var description: String {
+        switch self {
+        case .int(let number):
+            return String(number)
+        case .decimal(let number):
+            return NSDecimalNumber(decimal: number).stringValue
+        case .amount(let amount):
+            return amount.description
+        case .position(let position):
+            return position.description
+        case .inventory(let inventory):
+            return inventory.description
+        case .directive(let directive):
+            return directive.description.trimmingCharacters(in: .newlines)
+        case .dict(let dictionary):
+            let parts = dictionary.keys.sorted().map { key -> String in
+                "\(key):\(dictionary[key, default: .null].description)"
+            }
+            return "{\(parts.joined(separator: ","))}"
+        case .string(let text):
+            return text
+        case .bool(let value):
+            return value ? "TRUE" : "FALSE"
+        case .date(let date):
+            return Self.formatDate(date)
+        case .list(let values):
+            return values.map(\.description).joined(separator: ", ")
+        case .null:
+            return ""
+        }
+    }
+
+    private static func formatDate(_ date: Date) -> String {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone.current
+        let parts = calendar.dateComponents([.year, .month, .day], from: date)
+        let year = parts.year ?? 0
+        let month = parts.month ?? 0
+        let day = parts.day ?? 0
+        return String(format: "%04d-%02d-%02d", year, month, day)
+    }
 }
 
 public struct QueryRow: ExpressibleByDictionaryLiteral, Sendable {

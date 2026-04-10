@@ -165,13 +165,14 @@ struct BeancountSourceAdapterTests {
     @Test func runPostingFieldsExposeOtherAccountsTagsAndLinks() throws {
         let context = BeancountQueryContextBuilder.makeContext(from: try BeancountTestFixtures.sampleLedger())
         let result = try engine.run(
-            "SELECT account, other_accounts, tags, links FROM postings WHERE account = 'Expenses:Food'",
+            "SELECT account, posting_flag, other_accounts, tags, links FROM postings WHERE account = 'Expenses:Food'",
             in: context
         )
 
-        #expect(result.columns == ["account", "other_accounts", "tags", "links"])
+        #expect(result.columns == ["account", "posting_flag", "other_accounts", "tags", "links"])
         #expect(result.rows == [[
             .string("Expenses:Food"),
+            .string("!"),
             .list([.string("Assets:Cash")]),
             .list([.string("food"), .string("groceries")]),
             .list([.string("receipt")]),

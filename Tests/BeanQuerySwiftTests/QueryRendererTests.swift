@@ -1,4 +1,5 @@
 import Testing
+import Foundation
 @testable import BeanQuerySwift
 
 @Suite
@@ -84,6 +85,27 @@ struct QueryRendererTests {
             ,EUR,
             """ + "\n"
         )
+    }
+
+    @Test func runtimeValueDescriptionMatchesRendererStringifySemantics() throws {
+        let calendar = Calendar(identifier: .gregorian)
+        let date = calendar.date(from: DateComponents(year: 2026, month: 4, day: 10))!
+        let result = QueryResult(columns: ["value"], rows: [[.bool(false)]])
+
+        let rendered = try QueryRenderer.render(result, format: .text)
+        #expect(
+            rendered ==
+            """
+            value
+            -----
+            FALSE
+            """ + "\n"
+        )
+        #expect(RuntimeValue.bool(true).description == "TRUE")
+        #expect(RuntimeValue.date(date).description == "2026-04-10")
+        #expect(RuntimeValue.dict(["b": .null, "a": .int(1)]).description == "{a:1,b:}")
+        #expect(RuntimeValue.list([.string("USD"), .bool(false)]).description == "USD, FALSE")
+        #expect(RuntimeValue.null.description.isEmpty)
     }
 
     @Test func renderBeancountUsesDirectiveValues() throws {

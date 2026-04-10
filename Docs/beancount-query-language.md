@@ -54,6 +54,7 @@ SELECT
 ```sql
 SELECT
   account,     -- The account name (str)
+  posting_flag, -- The flag on the posting itself (str)
   other_accounts, -- Other accounts in the same transaction (set[str]-like list)
   position,    -- The full amount, including units and cost (Position)
   units,       -- The number and currency of the posting (Amount)

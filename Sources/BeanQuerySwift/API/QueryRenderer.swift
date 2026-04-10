@@ -625,35 +625,7 @@ private enum QueryRendererImpl {
     }
 
     private static func stringify(_ value: RuntimeValue) -> String {
-        switch value {
-        case .int(let number):
-            return String(number)
-        case .decimal(let number):
-            return NSDecimalNumber(decimal: number).stringValue
-        case .amount(let amount):
-            return amount.description
-        case .position(let position):
-            return position.description
-        case .inventory(let inventory):
-            return inventory.description
-        case .directive(let directive):
-            return directive.description.trimmingCharacters(in: .newlines)
-        case .dict(let dictionary):
-            let parts = dictionary.keys.sorted().map { key -> String in
-                "\(key):\(stringify(dictionary[key] ?? .null))"
-            }
-            return "{\(parts.joined(separator: ","))}"
-        case .string(let text):
-            return text
-        case .bool(let value):
-            return value ? "TRUE" : "FALSE"
-        case .date(let date):
-            return formatDate(date)
-        case .list(let values):
-            return values.map(stringify).joined(separator: ", ")
-        case .null:
-            return ""
-        }
+        value.description
     }
 
     private static func inventoryLines(

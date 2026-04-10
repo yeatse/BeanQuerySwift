@@ -100,6 +100,7 @@ public enum BeancountQueryContextBuilder {
                                     posting: posting,
                                     position: Position(posting: posting),
                                     flag: directiveContext.flag,
+                                    postingFlag: posting.flag.map { RuntimeValue.string(String($0)) } ?? .null,
                                     payee: directiveContext.payee,
                                     narration: directiveContext.narration,
                                     description: directiveContext.description,
@@ -323,6 +324,7 @@ struct BeancountPostingQueryRow: Sendable {
     let posting: Posting<Cost>
     let position: Position
     let flag: RuntimeValue
+    let postingFlag: RuntimeValue
     let payee: RuntimeValue
     let narration: RuntimeValue
     let description: RuntimeValue
@@ -352,6 +354,7 @@ struct BeancountPostingQueryRow: Sendable {
         "number",
         "other_accounts",
         "payee",
+        "posting_flag",
         "position",
         "price",
         "tags",
@@ -387,6 +390,7 @@ struct BeancountPostingQueryRow: Sendable {
         "number": { .decimal($0.posting.units.number) },
         "other_accounts": { $0.otherAccounts },
         "payee": { $0.payee },
+        "posting_flag": { $0.postingFlag },
         "position": { .position($0.position) },
         "price": { $0.posting.price.map(RuntimeValue.amount) ?? .null },
         "tags": { $0.tags },
