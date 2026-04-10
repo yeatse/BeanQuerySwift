@@ -50,6 +50,23 @@ struct BuiltinFunctionEvaluator {
         row: QueryRow?
     ) throws -> RuntimeValue {
         switch normalizedName {
+        case "getitem":
+            guard values.count == 2 || values.count == 3 else {
+                throw BQLExecutionError.unsupportedFunction(name)
+            }
+            if values[0] == .null {
+                return .null
+            }
+            guard case .dict(let dictionary) = values[0],
+                  case .string(let key) = values[1]
+            else {
+                throw BQLExecutionError.invalidType
+            }
+            if values.count == 3 {
+                return dictionary[key] ?? values[2]
+            }
+            return dictionary[key] ?? .null
+
         case "neg":
             guard values.count == 1 else {
                 throw BQLExecutionError.unsupportedFunction(name)
@@ -61,6 +78,41 @@ struct BuiltinFunctionEvaluator {
                 throw BQLExecutionError.unsupportedFunction(name)
             }
             return try absolute(values[0])
+
+        case "round":
+            guard values.count == 1 || values.count == 2 else {
+                throw BQLExecutionError.unsupportedFunction(name)
+            }
+            if values[0] == .null {
+                return .null
+            }
+            let digits: Int
+            if values.count == 2 {
+                guard let parsedDigits = asInt(values[1]) else {
+                    throw BQLExecutionError.invalidType
+                }
+                digits = parsedDigits
+            } else {
+                digits = 0
+            }
+            return try roundValue(values[0], digits: digits)
+
+        case "safediv":
+            guard values.count == 2 else {
+                throw BQLExecutionError.unsupportedFunction(name)
+            }
+            if values.contains(.null) {
+                return .null
+            }
+            guard let numerator = asDecimal(values[0]),
+                  let denominator = asDecimal(values[1])
+            else {
+                throw BQLExecutionError.invalidType
+            }
+            if denominator == .zero {
+                return .decimal(.zero)
+            }
+            return .decimal(numerator / denominator)
 
         // Type casting
         case "bool":
@@ -100,6 +152,60 @@ struct BuiltinFunctionEvaluator {
                 throw BQLExecutionError.invalidType
             }
             return .string(String(text.prefix(max(width, 0))))
+
+        case "length":
+            guard values.count == 1 else {
+                throw BQLExecutionError.unsupportedFunction(name)
+            }
+            if values[0] == .null {
+                return .null
+            }
+            switch values[0] {
+            case .string(let string):
+                return .int(string.count)
+            case .list(let values):
+                return .int(values.count)
+            case .dict(let dictionary):
+                return .int(dictionary.count)
+            default:
+                throw BQLExecutionError.invalidType
+            }
+
+        case "repr":
+            guard values.count == 1 else {
+                throw BQLExecutionError.unsupportedFunction(name)
+            }
+            return .string(repr(values[0]))
+
+        case "substr":
+            guard values.count == 3 else {
+                throw BQLExecutionError.unsupportedFunction(name)
+            }
+            if values.contains(.null) {
+                return .null
+            }
+            guard case .string(let string) = values[0],
+                  let start = asInt(values[1]),
+                  let end = asInt(values[2])
+            else {
+                throw BQLExecutionError.invalidType
+            }
+            return .string(substr(string, start: start, end: end))
+
+        case "splitcomp":
+            guard values.count == 3 else {
+                throw BQLExecutionError.unsupportedFunction(name)
+            }
+            if values.contains(.null) {
+                return .null
+            }
+            guard case .string(let string) = values[0],
+                  case .string(let delimiter) = values[1],
+                  let index = asInt(values[2])
+            else {
+                throw BQLExecutionError.invalidType
+            }
+            return splitComponent(string, delimiter: delimiter, index: index).map(RuntimeValue.string) ?? .null
 
         // Operations on dates
         case "date":
@@ -487,6 +593,34 @@ struct BuiltinFunctionEvaluator {
             }
             return metadata[key] ?? .null
 
+        case "currency_meta", "commodity_meta":
+            guard values.count == 1 || values.count == 2 else {
+                throw BQLExecutionError.unsupportedFunction(name)
+            }
+            if values[0] == .null {
+                return .null
+            }
+            guard case .string(let commodity) = values[0] else {
+                throw BQLExecutionError.invalidType
+            }
+
+            guard let commodityRow = lookupCommodity(commodity),
+                  case .dict(let metadata) = commodityRow["meta"] ?? .null
+            else {
+                return .null
+            }
+
+            if values.count == 1 {
+                return .dict(metadata)
+            }
+            if values[1] == .null {
+                return .null
+            }
+            guard case .string(let key) = values[1] else {
+                throw BQLExecutionError.invalidType
+            }
+            return metadata[key] ?? .null
+
         case "meta":
             guard values.count == 1 else {
                 throw BQLExecutionError.unsupportedFunction(name)
@@ -722,6 +856,34 @@ struct BuiltinFunctionEvaluator {
         }
     }
 
+    private func roundValue(_ value: RuntimeValue, digits: Int) throws -> RuntimeValue {
+        switch value {
+        case .int(let int):
+            return .int(roundedInt(int, digits: digits))
+        case .decimal(let decimal):
+            return .decimal(roundedDecimal(decimal, digits: digits))
+        case .null:
+            return .null
+        default:
+            throw BQLExecutionError.invalidType
+        }
+    }
+
+    private func roundedDecimal(_ value: Decimal, digits: Int) -> Decimal {
+        var input = value
+        var result = Decimal()
+        NSDecimalRound(&result, &input, digits, .plain)
+        return result
+    }
+
+    private func roundedInt(_ value: Int, digits: Int) -> Int {
+        if digits >= 0 {
+            return value
+        }
+        let rounded = roundedDecimal(Decimal(value), digits: digits)
+        return NSDecimalNumber(decimal: rounded).intValue
+    }
+
     private func castToBool(_ value: RuntimeValue) -> RuntimeValue {
         switch value {
         case .null:
@@ -832,6 +994,69 @@ struct BuiltinFunctionEvaluator {
             return .null
         }
         return metadata[key] ?? .null
+    }
+
+    private func repr(_ value: RuntimeValue) -> String {
+        switch value {
+        case .null:
+            return "None"
+        case .bool(let bool):
+            return bool ? "True" : "False"
+        case .int(let int):
+            return String(int)
+        case .decimal(let decimal):
+            return "Decimal('\(NSDecimalNumber(decimal: decimal).stringValue)')"
+        case .string(let string):
+            return "'\(escapeReprString(string))'"
+        case .date(let date):
+            let parts = dateParts(date)
+            return "datetime.date(\(parts.year), \(parts.month), \(parts.day))"
+        case .amount(let amount):
+            return "Amount('\(escapeReprString(amount.description))')"
+        case .position(let position):
+            return "Position('\(escapeReprString(position.description))')"
+        case .inventory(let inventory):
+            return "Inventory('\(escapeReprString(inventory.description))')"
+        case .directive(let directive):
+            return "'\(escapeReprString(directive.description.trimmingCharacters(in: .newlines)))'"
+        case .dict(let dictionary):
+            let parts = dictionary.keys.sorted().map { key in
+                "'\(escapeReprString(key))': \(repr(dictionary[key] ?? .null))"
+            }
+            return "{\(parts.joined(separator: ", "))}"
+        case .list(let values):
+            return "[\(values.map(repr).joined(separator: ", "))]"
+        }
+    }
+
+    private func escapeReprString(_ string: String) -> String {
+        string
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "'", with: "\\'")
+    }
+
+    private func substr(_ string: String, start: Int, end: Int) -> String {
+        let characters = Array(string)
+        let lowerBound = normalizedSliceIndex(start, count: characters.count)
+        let upperBound = normalizedSliceIndex(end, count: characters.count)
+        guard lowerBound < upperBound else {
+            return ""
+        }
+        return String(characters[lowerBound..<upperBound])
+    }
+
+    private func normalizedSliceIndex(_ index: Int, count: Int) -> Int {
+        let normalized = index >= 0 ? index : count + index
+        return min(max(normalized, 0), count)
+    }
+
+    private func splitComponent(_ string: String, delimiter: String, index: Int) -> String? {
+        let components = string.components(separatedBy: delimiter)
+        let normalizedIndex = index >= 0 ? index : components.count + index
+        guard components.indices.contains(normalizedIndex) else {
+            return nil
+        }
+        return components[normalizedIndex]
     }
 
     private func units(_ value: RuntimeValue) throws -> RuntimeValue {
@@ -1112,6 +1337,19 @@ struct BuiltinFunctionEvaluator {
         }
     }
 
+    private func lookupCommodity(_ commodity: String) -> QueryRow? {
+        guard let commodities = context.tables["commodities"] else {
+            return nil
+        }
+
+        return commodities.first { row in
+            guard case .string(let commodityName) = row["currency"] else {
+                return false
+            }
+            return commodityName == commodity
+        }
+    }
+
     private func accountSortIndex(_ account: String) -> Int {
         let root = account.split(separator: ":").first?.lowercased() ?? account.lowercased()
         switch root {
@@ -1246,6 +1484,17 @@ struct BuiltinFunctionEvaluator {
             return int
         }
         return nil
+    }
+
+    private func asDecimal(_ value: RuntimeValue) -> Decimal? {
+        switch value {
+        case .int(let int):
+            return Decimal(int)
+        case .decimal(let decimal):
+            return decimal
+        default:
+            return nil
+        }
     }
 
     private func dateCalendar() -> Calendar {

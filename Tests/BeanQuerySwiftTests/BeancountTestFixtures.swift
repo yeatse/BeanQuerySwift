@@ -13,11 +13,11 @@ enum BeancountTestFixtures {
         2024-01-01 open Income:Salary USD
         2024-01-01 open Expenses:Food USD
 
-        2024-01-10 * "Employer" "Salary"
+        2024-01-10 * "Employer" "Salary" #income ^job
           Assets:Cash      1000 USD
           Income:Salary   -1000 USD
 
-        2024-01-12 * "Store" "Groceries"
+        2024-01-12 * "Store" "Groceries" #food #groceries ^receipt
           Expenses:Food      80 USD
           Assets:Cash       -80 USD
 

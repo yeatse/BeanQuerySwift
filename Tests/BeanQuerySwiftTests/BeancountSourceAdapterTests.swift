@@ -162,6 +162,44 @@ struct BeancountSourceAdapterTests {
         ])
     }
 
+    @Test func runPostingFieldsExposeOtherAccountsTagsAndLinks() throws {
+        let context = BeancountQueryContextBuilder.makeContext(from: try BeancountTestFixtures.sampleLedger())
+        let result = try engine.run(
+            "SELECT account, other_accounts, tags, links FROM postings WHERE account = 'Expenses:Food'",
+            in: context
+        )
+
+        #expect(result.columns == ["account", "other_accounts", "tags", "links"])
+        #expect(result.rows == [[
+            .string("Expenses:Food"),
+            .list([.string("Assets:Cash")]),
+            .list([.string("food"), .string("groceries")]),
+            .list([.string("receipt")]),
+        ]])
+    }
+
+    @Test func runEntryFieldsExposeTagsAndLinksForFiltering() throws {
+        let context = BeancountQueryContextBuilder.makeContext(from: try BeancountTestFixtures.sampleLedger())
+
+        let result = try engine.run(
+            "SELECT narration, tags, links FROM entries WHERE narration = 'Groceries'",
+            in: context
+        )
+        #expect(result.columns == ["narration", "tags", "links"])
+        #expect(result.rows == [[
+            .string("Groceries"),
+            .list([.string("food"), .string("groceries")]),
+            .list([.string("receipt")]),
+        ]])
+
+        let filtered = try engine.run(
+            "SELECT narration FROM entries WHERE 'food' IN tags AND 'receipt' IN links",
+            in: context
+        )
+        #expect(filtered.columns == ["narration"])
+        #expect(filtered.rows == [[.string("Groceries")]])
+    }
+
     @Test func makeContextKeepsPostingsAndEntriesLazy() throws {
         let context = BeancountQueryContextBuilder.makeContext(from: try BeancountTestFixtures.sampleLedger())
 
@@ -195,6 +233,13 @@ struct BeancountSourceAdapterTests {
             Issue.record("expected wildcard columns to contain balance")
             return
         }
+        guard let tagsIndex = result.columns.firstIndex(of: "tags"),
+              let linksIndex = result.columns.firstIndex(of: "links"),
+              let otherAccountsIndex = result.columns.firstIndex(of: "other_accounts")
+        else {
+            Issue.record("expected wildcard columns to contain tags, links and other_accounts")
+            return
+        }
 
         #expect(result.rows.count == 2)
         guard case .inventory(let firstBalance) = result.rows[0][balanceIndex],
@@ -208,6 +253,9 @@ struct BeancountSourceAdapterTests {
         let expectedSecond: Inventory = "10 VTI {100 USD, 2024-01-15}, 5 VTI {110 USD, 2024-02-10}"
         #expect(firstBalance == expectedFirst)
         #expect(secondBalance == expectedSecond)
+        #expect(result.rows[0][tagsIndex] == .list([]))
+        #expect(result.rows[0][linksIndex] == .list([]))
+        #expect(result.rows[0][otherAccountsIndex] == .list([.string("Assets:Cash")]))
     }
 
     @Test func runBudgetSearchQueriesLikeBeanQuery() throws {

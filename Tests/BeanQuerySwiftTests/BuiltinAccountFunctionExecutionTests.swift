@@ -80,6 +80,25 @@ struct BuiltinAccountFunctionExecutionTests {
         #expect(result.rows[0][2] == .null)
     }
 
+    @Test func runCurrencyMetaFunctions() throws {
+        let context = BeancountQueryContextBuilder.makeContext(from: try BeancountTestFixtures.sampleAccountFunctionLedger())
+        let result = try engine.run(
+            "SELECT currency_meta('TEST') AS meta, currency_meta('TEST', 'answer') AS answer, currency_meta('X', 'answer') AS missing FROM #",
+            in: context
+        )
+
+        #expect(result.columns == ["meta", "answer", "missing"])
+        #expect(result.rows.count == 1)
+
+        guard case .dict(let metadata) = result.rows[0][0] else {
+            Issue.record("expected commodity metadata dictionary")
+            return
+        }
+        #expect(metadata["answer"] == .string("42"))
+        #expect(result.rows[0][1] == .string("42"))
+        #expect(result.rows[0][2] == .null)
+    }
+
     @Test func runAccountSortKeyFunction() throws {
         let result = try engine.run(
             "SELECT account_sortkey('Assets:Foo') AS assets, account_sortkey('Liabilities:Foo') AS liabilities, account_sortkey('Equity:Foo') AS equity, account_sortkey('Income:Foo') AS income, account_sortkey('Expenses:Foo') AS expenses FROM #",

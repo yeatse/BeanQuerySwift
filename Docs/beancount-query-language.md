@@ -54,11 +54,14 @@ SELECT
 ```sql
 SELECT
   account,     -- The account name (str)
+  other_accounts, -- Other accounts in the same transaction (set[str]-like list)
   position,    -- The full amount, including units and cost (Position)
   units,       -- The number and currency of the posting (Amount)
   cost,        -- The cost basis of the posting (Cost)
   price,       -- The price used in the posting (Amount)
   weight,      -- The position converted to its cost basis (Amount)
+  tags,        -- Parent transaction tags
+  links,       -- Parent transaction links
   balance      -- The running total of units in the account (Inventory)
 ```
 ## Query Functions
@@ -98,6 +101,18 @@ SELECT account,
   VALUE(SUM(position)) AS market_value
 FROM account ~ "Assets:Investments"
 GROUP BY account
+```
+
+### Scalar / Metadata Helper Functions
+BeanQuerySwift also supports the common beanquery helper functions used in prompt-driven queries and report builders.
+```sql
+-- Scalar helpers
+SELECT ROUND(1.234, 2), SAFEDIV(1.0, 0.0), REPR(1.2)
+SELECT LENGTH(account), SUBSTR(account, 0, 6), SPLITCOMP(account, ":", 1)
+
+-- Metadata lookups
+SELECT GETITEM(open_meta('Assets:Cash'), 'booking')
+SELECT currency_meta('VTI', 'sector')  -- alias: commodity_meta(...)
 ```
 ## Advanced Features
 Beyond basic `SELECT` statements, BQL offers specialized commands for common financial reports.

@@ -257,6 +257,63 @@ struct BuiltinFunctionExecutionTests {
         #expect(result.rows == expectedRows)
     }
 
+    @Test func runScalarUtilityFunctionsLikePythonBeanQuery() throws {
+        let result = try engine.run(
+            """
+            SELECT
+              round(1.234, 2) AS rounded_decimal,
+              round(12, -1) AS rounded_int,
+              safediv(1.0, 0.0) AS safe_zero,
+              repr(1.2) AS repr_decimal,
+              length('Assets:Cash') AS account_len,
+              substr('Assets:Cash', 7, 11) AS tail,
+              splitcomp('Assets:Cash:Wallet', ':', 1) AS component
+            FROM #
+            """,
+            in: QueryContext()
+        )
+
+        #expect(result.columns == [
+            "rounded_decimal",
+            "rounded_int",
+            "safe_zero",
+            "repr_decimal",
+            "account_len",
+            "tail",
+            "component",
+        ])
+        #expect(result.rows == [[
+            .decimal(Decimal(string: "1.23")!),
+            .int(10),
+            .decimal(.zero),
+            .string("Decimal('1.2')"),
+            .int(11),
+            .string("Cash"),
+            .string("Cash"),
+        ]])
+    }
+
+    @Test func runGetitemFunctionOnMetadataDictionaries() throws {
+        let context = BeancountQueryContextBuilder.makeContext(from: try BeancountTestFixtures.sampleAccountFunctionLedger())
+        let result = try engine.run(
+            """
+            SELECT
+              getitem(open_meta('Assets:Tests'), 'key') AS key_value,
+              getitem(open_meta('Assets:Tests'), 'missing', 'fallback') AS fallback_value,
+              getitem(open_meta('Expenses:Missing'), 'key') AS missing_meta
+            FROM #
+            """,
+            in: context
+        )
+
+        #expect(result.columns == ["key_value", "fallback_value", "missing_meta"])
+        #expect(result.rows == [[
+            .string("value"),
+            .string("fallback"),
+            .null,
+        ]])
+    }
+
     @Test func runTypeCastingFunctionsLikePythonBeanQuery() throws {
         let context = BeancountQueryContextBuilder.makeContext(from: try BeancountTestFixtures.sampleLedger())
         let result = try engine.run(
