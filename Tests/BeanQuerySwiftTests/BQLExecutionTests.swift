@@ -126,6 +126,41 @@ struct BQLExecutionTests {
         ])
     }
 
+    @Test func runNumericEqualityAcrossIntAndDecimal() throws {
+        let result = try engine.run(
+            "SELECT 1 = decimal('1') AS eq, 1 != decimal('1') AS ne FROM #postings LIMIT 1",
+            in: context
+        )
+
+        #expect(result.columns == ["eq", "ne"])
+        #expect(result.rows == [[.bool(true), .bool(false)]])
+    }
+
+    @Test func runYearComparisonAgainstTodayArithmetic() throws {
+        let calendar = Calendar(identifier: .gregorian)
+        let previousYear = calendar.component(.year, from: Date()) - 1
+        let dynamicContext = QueryContext(tables: [
+            "postings": [
+                [
+                    "account": .string("Expenses:Food"),
+                    "year": .int(previousYear),
+                ],
+                [
+                    "account": .string("Expenses:Food"),
+                    "year": .int(previousYear - 1),
+                ],
+            ],
+        ])
+
+        let result = try engine.run(
+            "SELECT account, year WHERE account ~ '^Expenses' AND year = year(today()) - 1",
+            in: dynamicContext
+        )
+
+        #expect(result.columns == ["account", "year"])
+        #expect(result.rows == [[.string("Expenses:Food"), .int(previousYear)]])
+    }
+
     @Test func runSelectGroupByAggregate() throws {
         let result = try engine.run(
             "SELECT account, sum(number) AS total FROM #postings WHERE year = 2024 GROUP BY account ORDER BY total DESC",

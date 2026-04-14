@@ -647,6 +647,9 @@ struct QueryExecutor {
 
         switch op {
         case .add:
+            if let l = asInt(left), let r = asInt(right) {
+                return .int(l + r)
+            }
             if let lhsDate = asDate(left), let rhsStride = asDateStride(right) {
                 return addStride(lhsDate, rhsStride).map(RuntimeValue.date) ?? .null
             }
@@ -663,15 +666,15 @@ struct QueryExecutor {
             if let l = asDecimal(left), let r = asDecimal(right) {
                 return .decimal(l + r)
             }
-            if let l = asInt(left), let r = asInt(right) {
-                return .int(l + r)
-            }
             if case .string(let l) = left, case .string(let r) = right {
                 return .string(l + r)
             }
             throw BQLExecutionError.invalidType
 
         case .sub:
+            if let l = asInt(left), let r = asInt(right) {
+                return .int(l - r)
+            }
             if let lhsDate = asDate(left), let rhsStride = asDateStride(right) {
                 return addStride(lhsDate, rhsStride.negated).map(RuntimeValue.date) ?? .null
             }
@@ -691,17 +694,14 @@ struct QueryExecutor {
             if let l = asDecimal(left), let r = asDecimal(right) {
                 return .decimal(l - r)
             }
-            if let l = asInt(left), let r = asInt(right) {
-                return .int(l - r)
-            }
             throw BQLExecutionError.invalidType
 
         case .mul:
-            if let l = asDecimal(left), let r = asDecimal(right) {
-                return .decimal(l * r)
-            }
             if let l = asInt(left), let r = asInt(right) {
                 return .int(l * r)
+            }
+            if let l = asDecimal(left), let r = asDecimal(right) {
+                return .decimal(l * r)
             }
             throw BQLExecutionError.invalidType
 
@@ -721,10 +721,10 @@ struct QueryExecutor {
             throw BQLExecutionError.invalidType
 
         case .equal:
-            return .bool(left == right)
+            return .bool(numericEquals(left, right))
 
         case .notEqual:
-            return .bool(left != right)
+            return .bool(!numericEquals(left, right))
 
         case .less:
             return .bool(compare(left, right) == .orderedAscending)
@@ -973,6 +973,17 @@ struct QueryExecutor {
         default:
             return .orderedSame
         }
+    }
+
+    private func numericEquals(_ left: RuntimeValue, _ right: RuntimeValue) -> Bool {
+        if left == right {
+            return true
+        }
+
+        guard let lhs = asDecimal(left), let rhs = asDecimal(right) else {
+            return false
+        }
+        return lhs == rhs
     }
 
     private func matches(pattern: String, in input: String, caseInsensitive: Bool) -> Bool {

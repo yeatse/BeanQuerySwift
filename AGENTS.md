@@ -8,9 +8,9 @@ Keep BeanQuerySwift behavior aligned with Python `beanquery` while staying pragm
 
 Primary references:
 
-- Python source: `/Users/yeatse/Developer/Repo/beancount/beanquery/beanquery`
-- Plan doc: `/Users/yeatse/Developer/Repo/BeanQuerySwift/Docs/bean-query-swift-execution-plan.md`
-- ANTLR process: `/Users/yeatse/Developer/Repo/BeanQuerySwift/Docs/antlr.md`
+- Python source: `../beanquery`
+- Plan doc: `Docs/bean-query-swift-execution-plan.md`
+- ANTLR process: `Docs/antlr.md`
 
 ## Local Environment
 
