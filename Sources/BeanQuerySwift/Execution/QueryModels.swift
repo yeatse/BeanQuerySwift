@@ -1,4 +1,5 @@
 import Foundation
+import Synchronization
 import BeancountSwift
 
 public enum RuntimeValue: Hashable, Sendable {
@@ -9,6 +10,7 @@ public enum RuntimeValue: Hashable, Sendable {
     case inventory(Inventory)
     case directive(Directive<Cost>)
     case dict([String: RuntimeValue])
+    case structure(name: String, fields: [String: RuntimeValue])
     case string(String)
     case bool(Bool)
     case date(Date)
@@ -44,6 +46,11 @@ public enum RuntimeValue: Hashable, Sendable {
                 "\(key):\(dictionary[key, default: .null].stringRepresentation(placeholder: placeholder))"
             }
             return "{\(parts.joined(separator: ","))}"
+        case .structure(let name, let fields):
+            let parts = fields.keys.sorted().map { key -> String in
+                "\(key):\(fields[key, default: .null].stringRepresentation(placeholder: placeholder))"
+            }
+            return "\(name)(\(parts.joined(separator: ", ")))"
         case .string(let text):
             return text
         case .bool(let value):
@@ -116,6 +123,11 @@ indirect enum QueryRowStorage: Sendable {
     case beancountPosting(BeancountPostingQueryRow)
     case beancountEntry(BeancountEntryQueryRow)
     case beancountAccount(BeancountAccountQueryRow)
+    case beancountTransaction(BeancountTransactionQueryRow)
+    case beancountPrice(BeancountPriceQueryRow)
+    case beancountBalance(BeancountBalanceQueryRow)
+    case beancountNote(BeancountNoteQueryRow)
+    case beancountEvent(BeancountEventQueryRow)
 
     func value(for column: String) -> RuntimeValue? {
         switch self {
@@ -128,6 +140,16 @@ indirect enum QueryRowStorage: Sendable {
         case .beancountEntry(let row):
             return row.value(for: column)
         case .beancountAccount(let row):
+            return row.value(for: column)
+        case .beancountTransaction(let row):
+            return row.value(for: column)
+        case .beancountPrice(let row):
+            return row.value(for: column)
+        case .beancountBalance(let row):
+            return row.value(for: column)
+        case .beancountNote(let row):
+            return row.value(for: column)
+        case .beancountEvent(let row):
             return row.value(for: column)
         }
     }
@@ -144,6 +166,43 @@ indirect enum QueryRowStorage: Sendable {
             return BeancountEntryQueryRow.wildcardColumns
         case .beancountAccount:
             return BeancountAccountQueryRow.wildcardColumns
+        case .beancountTransaction:
+            return BeancountTransactionQueryRow.wildcardColumns
+        case .beancountPrice:
+            return BeancountPriceQueryRow.wildcardColumns
+        case .beancountBalance:
+            return BeancountBalanceQueryRow.wildcardColumns
+        case .beancountNote:
+            return BeancountNoteQueryRow.wildcardColumns
+        case .beancountEvent:
+            return BeancountEventQueryRow.wildcardColumns
+        }
+    }
+}
+
+final class LazyResolver<T: Sendable>: Sendable {
+    private struct State {
+        var cached: T?
+        var build: (@Sendable () -> T)?
+    }
+
+    private let state: Mutex<State>
+
+    init(eager value: T) {
+        self.state = Mutex(State(cached: value, build: nil))
+    }
+
+    init(_ build: @escaping @Sendable () -> T) {
+        self.state = Mutex(State(cached: nil, build: build))
+    }
+
+    var value: T {
+        state.withLock { state in
+            if let cached = state.cached { return cached }
+            let produced = state.build!()
+            state.cached = produced
+            state.build = nil
+            return produced
         }
     }
 }
@@ -165,12 +224,17 @@ extension QueryTableProvider {
 
 public struct QueryContext: Sendable {
     public var tables: [String: [QueryRow]]
-    public var priceMap: PriceMap?
+    private var priceMapResolver: LazyResolver<PriceMap?>
     private var providers: [String: any QueryTableProvider]
+
+    public var priceMap: PriceMap? {
+        get { priceMapResolver.value }
+        set { priceMapResolver = LazyResolver(eager: newValue) }
+    }
 
     public init(tables: [String: [QueryRow]] = [:], priceMap: PriceMap? = nil) {
         self.tables = tables
-        self.priceMap = priceMap
+        self.priceMapResolver = LazyResolver(eager: priceMap)
         self.providers = [:]
     }
 
@@ -180,7 +244,17 @@ public struct QueryContext: Sendable {
         priceMap: PriceMap? = nil
     ) {
         self.tables = tables
-        self.priceMap = priceMap
+        self.priceMapResolver = LazyResolver(eager: priceMap)
+        self.providers = providers
+    }
+
+    init(
+        tables: [String: [QueryRow]] = [:],
+        providers: [String: any QueryTableProvider],
+        priceMapResolver: LazyResolver<PriceMap?>
+    ) {
+        self.tables = tables
+        self.priceMapResolver = priceMapResolver
         self.providers = providers
     }
 

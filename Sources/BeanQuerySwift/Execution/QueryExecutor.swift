@@ -509,8 +509,9 @@ struct QueryExecutor {
                 return .bool(!bools.contains(false))
             }
 
-        case .attribute:
-            throw BQLExecutionError.unsupportedExpression("attribute")
+        case .attribute(let operandExpr, let name):
+            let value = try evaluateExpression(operandExpr, row: row, group: group, context: context, state: state)
+            return try resolveAttribute(value, name: name)
 
         case .subscriptExpr:
             throw BQLExecutionError.unsupportedExpression("subscript")
@@ -1013,6 +1014,13 @@ struct QueryExecutor {
                 return "\(key):\(renderValue(value))"
             }
             return "{\(parts.joined(separator: ","))}"
+        case .structure(let name, let fields):
+            let keys = fields.keys.sorted()
+            let parts = keys.map { key -> String in
+                let value = fields[key] ?? .null
+                return "\(key):\(renderValue(value))"
+            }
+            return "\(name)(\(parts.joined(separator: ", ")))"
         case .string(let text):
             return text
         case .bool(let value):
@@ -1032,6 +1040,168 @@ struct QueryExecutor {
         case .null:
             return "null"
         }
+    }
+}
+
+private func resolveAttribute(_ value: RuntimeValue, name: String) throws -> RuntimeValue {
+    switch value {
+    case .null:
+        return .null
+    case .structure(_, let fields):
+        return fields[name] ?? .null
+    case .dict(let map):
+        return map[name] ?? .null
+    case .amount(let amount):
+        switch name {
+        case "number": return .decimal(amount.number)
+        case "currency": return .string(amount.currency.id)
+        default: return .null
+        }
+    case .position(let position):
+        switch name {
+        case "units": return .amount(position.units)
+        case "cost":
+            guard let cost = position.cost else { return .null }
+            return costStructure(cost)
+        default: return .null
+        }
+    case .date(let date):
+        let parts = Calendar(identifier: .gregorian).dateComponents([.year, .month, .day], from: date)
+        switch name {
+        case "year": return parts.year.map(RuntimeValue.int) ?? .null
+        case "month": return parts.month.map(RuntimeValue.int) ?? .null
+        case "day": return parts.day.map(RuntimeValue.int) ?? .null
+        default: return .null
+        }
+    case .directive(let directive):
+        return directiveAttribute(directive, name: name)
+    default:
+        throw BQLExecutionError.invalidType
+    }
+}
+
+private func costStructure(_ cost: Cost) -> RuntimeValue {
+    .structure(name: "Cost", fields: [
+        "number": .decimal(cost.number),
+        "currency": .string(cost.currency.id),
+        "date": cost.date.map(RuntimeValue.date) ?? .null,
+        "label": cost.label.map(RuntimeValue.string) ?? .null,
+    ])
+}
+
+private func directiveAttribute(_ directive: Directive<Cost>, name: String) -> RuntimeValue {
+    switch name {
+    case "date":
+        return .date(directive.date)
+    case "meta":
+        var fields: [String: RuntimeValue] = [:]
+        for (key, value) in directive.meta {
+            fields[key] = directiveMetaValue(value)
+        }
+        return .dict(fields)
+    case "type":
+        return .string(directiveTypeName(directive.content))
+    default:
+        break
+    }
+    switch directive.content {
+    case .transaction(let transaction):
+        switch name {
+        case "flag": return transaction.flag.map { .string(String($0)) } ?? .null
+        case "payee": return transaction.payee.map(RuntimeValue.string) ?? .null
+        case "narration": return transaction.narration.map(RuntimeValue.string) ?? .null
+        case "tags": return .list(transaction.tags.map { .string($0.id) })
+        case "links": return .list(transaction.links.map { .string($0.id) })
+        case "postings": return .list(transaction.postings.map { .position(Position(posting: $0)) })
+        case "accounts": return .list(transaction.postings.map { .string($0.account.id) })
+        default: return .null
+        }
+    case .open(let open):
+        switch name {
+        case "account": return .string(open.account.id)
+        case "currencies": return .list(open.currencies.map { .string($0.id) })
+        case "booking": return open.booking.map { .string(String(describing: $0)) } ?? .null
+        default: return .null
+        }
+    case .close(let close):
+        if name == "account" { return .string(close.account.id) }
+        return .null
+    case .balance(let balance):
+        switch name {
+        case "account": return .string(balance.account.id)
+        case "amount": return .amount(balance.amount)
+        case "tolerance": return balance.tolerance.map(RuntimeValue.decimal) ?? .null
+        case "discrepancy": return balance.diffAmount.map(RuntimeValue.amount) ?? .null
+        default: return .null
+        }
+    case .price(let price):
+        switch name {
+        case "currency": return .string(price.currency.id)
+        case "amount": return .amount(price.amount)
+        default: return .null
+        }
+    case .note(let note):
+        switch name {
+        case "account": return .string(note.account.id)
+        case "comment": return .string(note.note)
+        default: return .null
+        }
+    case .event(let event):
+        switch name {
+        case "type": return .string(event.type)
+        case "description": return .string(event.description)
+        default: return .null
+        }
+    case .document(let document):
+        switch name {
+        case "account": return .string(document.account.id)
+        case "filename": return .string(document.filename)
+        case "tags": return .list((document.tags ?? []).map { .string($0.id) })
+        case "links": return .list((document.links ?? []).map { .string($0.id) })
+        default: return .null
+        }
+    case .commodity(let commodity):
+        if name == "currency" { return .string(commodity.currency.id) }
+        return .null
+    case .pad(let pad):
+        switch name {
+        case "account": return .string(pad.account.id)
+        case "source_account": return .string(pad.sourceAccount.id)
+        default: return .null
+        }
+    case .query, .custom:
+        return .null
+    }
+}
+
+private func directiveTypeName(_ content: DirectiveContent<Cost>) -> String {
+    switch content {
+    case .open: return "open"
+    case .close: return "close"
+    case .commodity: return "commodity"
+    case .pad: return "pad"
+    case .balance: return "balance"
+    case .transaction: return "transaction"
+    case .note: return "note"
+    case .event: return "event"
+    case .query: return "query"
+    case .price: return "price"
+    case .document: return "document"
+    case .custom: return "custom"
+    }
+}
+
+private func directiveMetaValue(_ value: MetaDataValue) -> RuntimeValue {
+    switch value {
+    case .string(let text): return .string(text)
+    case .account(let account): return .string(account.id)
+    case .currency(let currency): return .string(currency.id)
+    case .date(let date): return .date(date)
+    case .tag(let tag): return .string(tag.id)
+    case .number(let number): return .decimal(number)
+    case .bool(let bool): return .bool(bool)
+    case .amount(let amount): return .amount(amount)
+    case .range(let range): return .string(String(describing: range))
     }
 }
 

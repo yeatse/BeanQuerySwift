@@ -551,7 +551,7 @@ struct BuiltinFunctionEvaluator {
             guard case .string(let account) = values[0] else {
                 throw BQLExecutionError.invalidType
             }
-            return lookupAccount(account)?["open_date"] ?? .null
+            return structureField(lookupAccount(account)?["open"], "date") ?? .null
 
         case "close_date":
             guard values.count == 1 else {
@@ -563,7 +563,7 @@ struct BuiltinFunctionEvaluator {
             guard case .string(let account) = values[0] else {
                 throw BQLExecutionError.invalidType
             }
-            return lookupAccount(account)?["close_date"] ?? .null
+            return structureField(lookupAccount(account)?["close"], "date") ?? .null
 
         case "open_meta":
             guard values.count == 1 || values.count == 2 else {
@@ -577,7 +577,7 @@ struct BuiltinFunctionEvaluator {
             }
 
             guard let accountRow = lookupAccount(account),
-                  case .dict(let metadata) = accountRow["open_meta"] ?? .null
+                  case .dict(let metadata) = structureField(accountRow["open"], "meta") ?? .null
             else {
                 return .null
             }
@@ -970,6 +970,16 @@ struct BuiltinFunctionEvaluator {
                 return "\(key):\(stringValue)"
             }
             return .string("{\(rendered.joined(separator: ","))}")
+        case .structure(let name, let fields):
+            let keys = fields.keys.sorted()
+            let rendered = keys.map { key -> String in
+                let renderedValue = castToString(fields[key] ?? .null)
+                guard case .string(let stringValue) = renderedValue else {
+                    return "\(key):"
+                }
+                return "\(key):\(stringValue)"
+            }
+            return .string("\(name)(\(rendered.joined(separator: ", ")))")
         case .string(let string):
             return .string(string)
         case .date(let date):
@@ -1024,6 +1034,11 @@ struct BuiltinFunctionEvaluator {
                 "'\(escapeReprString(key))': \(repr(dictionary[key] ?? .null))"
             }
             return "{\(parts.joined(separator: ", "))}"
+        case .structure(let name, let fields):
+            let parts = fields.keys.sorted().map { key in
+                "\(key)=\(repr(fields[key] ?? .null))"
+            }
+            return "\(name)(\(parts.joined(separator: ", ")))"
         case .list(let values):
             return "[\(values.map(repr).joined(separator: ", "))]"
         }
@@ -1324,7 +1339,26 @@ struct BuiltinFunctionEvaluator {
         return account.split(separator: ":", omittingEmptySubsequences: false).last.map(String.init)
     }
 
+    private func structureField(_ value: RuntimeValue?, _ name: String) -> RuntimeValue? {
+        guard let value else { return nil }
+        switch value {
+        case .structure(_, let fields): return fields[name]
+        case .dict(let map): return map[name]
+        default: return nil
+        }
+    }
+
     private func lookupAccount(_ account: String) -> QueryRow? {
+        if let provider = context.provider(named: "accounts"),
+           let rows = try? provider.rows(for: nil) {
+            for row in rows {
+                if case .string(let accountName) = row["account"], accountName == account {
+                    return row
+                }
+            }
+            return nil
+        }
+
         guard let accounts = context.tables["accounts"] else {
             return nil
         }
@@ -1338,6 +1372,16 @@ struct BuiltinFunctionEvaluator {
     }
 
     private func lookupCommodity(_ commodity: String) -> QueryRow? {
+        if let provider = context.provider(named: "commodities"),
+           let rows = try? provider.rows(for: nil) {
+            for row in rows {
+                if case .string(let commodityName) = row["currency"], commodityName == commodity {
+                    return row
+                }
+            }
+            return nil
+        }
+
         guard let commodities = context.tables["commodities"] else {
             return nil
         }

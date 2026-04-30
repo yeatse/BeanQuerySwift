@@ -517,6 +517,8 @@ private enum QueryRendererImpl {
             return .directive
         case .dict:
             return .object
+        case .structure:
+            return .object
         case .string:
             return .string
         case .bool:

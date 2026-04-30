@@ -57,11 +57,11 @@ struct BeancountSourceAdapterTests {
     @Test func runQueryAgainstAccountsTable() throws {
         let context = BeancountQueryContextBuilder.makeContext(from: try BeancountTestFixtures.sampleLedger())
         let result = try engine.run(
-            "SELECT account, type, close_date FROM accounts ORDER BY account",
+            "SELECT account, type, close.date AS closed FROM accounts ORDER BY account",
             in: context
         )
 
-        #expect(result.columns == ["account", "type", "close_date"])
+        #expect(result.columns == ["account", "type", "closed"])
         #expect(result.rows.count == 3)
         #expect(result.rows[0][0] == .string("Assets:Cash"))
         #expect(result.rows[0][1] == .string("assets"))
@@ -206,7 +206,8 @@ struct BeancountSourceAdapterTests {
 
         #expect(context.tables["postings"] == nil)
         #expect(context.tables["entries"] == nil)
-        #expect(context.tables["accounts"] != nil)
+        #expect(context.tables["accounts"] == nil)
+        #expect(context.tables["commodities"] == nil)
 
         let postings = try engine.run(
             "SELECT count(*) AS cnt FROM postings",
@@ -257,6 +258,97 @@ struct BeancountSourceAdapterTests {
         #expect(result.rows[0][tagsIndex] == .list([]))
         #expect(result.rows[0][linksIndex] == .list([]))
         #expect(result.rows[0][otherAccountsIndex] == .list([.string("Assets:Cash")]))
+    }
+
+    @Test func runQueryAgainstTransactionsTable() throws {
+        let context = BeancountQueryContextBuilder.makeContext(from: try BeancountTestFixtures.directiveTablesLedger())
+        let result = try engine.run(
+            "SELECT date, payee, narration, flag, accounts, tags FROM transactions ORDER BY date",
+            in: context
+        )
+
+        #expect(result.columns == ["date", "payee", "narration", "flag", "accounts", "tags"])
+        #expect(result.rows.count == 2)
+        #expect(result.rows[0][1] == .string("Employer"))
+        #expect(result.rows[0][2] == .string("Salary"))
+        #expect(result.rows[0][3] == .string("*"))
+        #expect(result.rows[0][4] == .list([.string("Assets:Cash"), .string("Income:Salary")]))
+        #expect(result.rows[0][5] == .list([.string("income")]))
+        #expect(result.rows[1][1] == .string("Store"))
+        #expect(result.rows[1][4] == .list([.string("Expenses:Food"), .string("Assets:Cash")]))
+    }
+
+    @Test func runQueryAgainstPricesTable() throws {
+        let context = BeancountQueryContextBuilder.makeContext(from: try BeancountTestFixtures.directiveTablesLedger())
+        let result = try engine.run(
+            "SELECT date, currency, amount FROM prices ORDER BY date",
+            in: context
+        )
+
+        #expect(result.columns == ["date", "currency", "amount"])
+        #expect(result.rows.count == 2)
+        #expect(result.rows[0][1] == .string("EUR"))
+        #expect(result.rows[0][2] == .amount(Amount(number: Decimal(string: "1.10")!, currency: Currency(id: "USD"))))
+        #expect(result.rows[1][2] == .amount(Amount(number: Decimal(string: "1.12")!, currency: Currency(id: "USD"))))
+    }
+
+    @Test func runQueryAgainstBalancesTable() throws {
+        let context = BeancountQueryContextBuilder.makeContext(from: try BeancountTestFixtures.directiveTablesLedger())
+        let result = try engine.run(
+            "SELECT date, account, amount, tolerance, discrepancy FROM balances",
+            in: context
+        )
+
+        #expect(result.columns == ["date", "account", "amount", "tolerance", "discrepancy"])
+        #expect(result.rows.count == 1)
+        #expect(result.rows[0][1] == .string("Assets:Cash"))
+        #expect(result.rows[0][2] == .amount(Amount(number: 920, currency: Currency(id: "USD"))))
+        #expect(result.rows[0][4] == .null)
+    }
+
+    @Test func runQueryAgainstNotesTable() throws {
+        let context = BeancountQueryContextBuilder.makeContext(from: try BeancountTestFixtures.directiveTablesLedger())
+        let result = try engine.run(
+            "SELECT date, account, comment FROM notes",
+            in: context
+        )
+
+        #expect(result.columns == ["date", "account", "comment"])
+        #expect(result.rows.count == 1)
+        #expect(result.rows[0][1] == .string("Assets:Cash"))
+        #expect(result.rows[0][2] == .string("Reconciled with statement"))
+    }
+
+    @Test func runQueryAgainstEventsTable() throws {
+        let context = BeancountQueryContextBuilder.makeContext(from: try BeancountTestFixtures.directiveTablesLedger())
+        let result = try engine.run(
+            "SELECT date, type, description FROM events",
+            in: context
+        )
+
+        #expect(result.columns == ["date", "type", "description"])
+        #expect(result.rows.count == 1)
+        #expect(result.rows[0][1] == .string("location"))
+        #expect(result.rows[0][2] == .string("Tokyo"))
+    }
+
+    @Test func runWildcardSelectsExposeNewDirectiveColumns() throws {
+        let context = BeancountQueryContextBuilder.makeContext(from: try BeancountTestFixtures.directiveTablesLedger())
+
+        let prices = try engine.run("SELECT * FROM prices", in: context)
+        #expect(prices.columns == ["amount", "currency", "date"])
+
+        let balances = try engine.run("SELECT * FROM balances", in: context)
+        #expect(balances.columns == ["account", "amount", "date", "discrepancy", "tolerance"])
+
+        let notes = try engine.run("SELECT * FROM notes", in: context)
+        #expect(notes.columns == ["account", "comment", "date"])
+
+        let events = try engine.run("SELECT * FROM events", in: context)
+        #expect(events.columns == ["date", "description", "type"])
+
+        let transactions = try engine.run("SELECT * FROM transactions", in: context)
+        #expect(transactions.columns == ["accounts", "date", "flag", "links", "narration", "payee", "tags"])
     }
 
     @Test func runBudgetSearchQueriesLikeBeanQuery() throws {

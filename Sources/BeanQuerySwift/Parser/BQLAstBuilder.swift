@@ -119,6 +119,11 @@ struct BQLAstBuilder {
             return .named(try buildIdentifier(identifier))
         }
 
+        if ctx.BALANCES() != nil || ctx.JOURNAL() != nil || ctx.PRINT() != nil {
+            let raw = try tokenText(ctx.getStart(), "missing table name token")
+            return .named(String(raw).lowercased())
+        }
+
         throw BQLASTBuildError("invalid table reference")
     }
 
@@ -362,7 +367,13 @@ struct BQLAstBuilder {
         if let leftCtx = ctx.primaryExpr() {
             let left = try buildPrimaryExpr(leftCtx)
             if ctx.DOT() != nil {
-                return .attribute(left, name: try buildIdentifier(require(ctx.identifier(), "missing attribute")))
+                if let id = ctx.identifier() {
+                    return .attribute(left, name: try buildIdentifier(id))
+                }
+                if let kw = ctx.contextualKeyword() {
+                    return .attribute(left, name: try buildContextualKeyword(kw))
+                }
+                throw BQLASTBuildError("missing attribute")
             }
             if ctx.LBRACK() != nil {
                 return .subscriptExpr(left, key: try buildStringLiteral(require(ctx.stringLiteral(), "missing subscript key")))
@@ -371,6 +382,11 @@ struct BQLAstBuilder {
         }
 
         return try buildAtomExpr(require(ctx.atomExpr(), "missing atom expression"))
+    }
+
+    private static func buildContextualKeyword(_ ctx: BQLParser.ContextualKeywordContext) throws -> String {
+        let text = try tokenText(ctx.getStart(), "missing contextual keyword token")
+        return String(text).lowercased()
     }
 
     private static func buildAtomExpr(_ ctx: BQLParser.AtomExprContext) throws -> BQLExpression {
@@ -384,7 +400,13 @@ struct BQLAstBuilder {
             return .constant(try buildConstant(constant))
         }
         if let column = ctx.columnRef() {
-            return .column(try buildIdentifier(require(column.identifier(), "missing column identifier")))
+            if let id = column.identifier() {
+                return .column(try buildIdentifier(id))
+            }
+            if let kw = column.contextualKeyword() {
+                return .column(try buildContextualKeyword(kw))
+            }
+            throw BQLASTBuildError("missing column identifier")
         }
         if let placeholder = ctx.placeholder() {
             return .placeholder(try buildPlaceholder(placeholder))

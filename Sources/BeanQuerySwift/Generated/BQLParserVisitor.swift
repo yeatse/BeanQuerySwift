@@ -460,6 +460,16 @@ internal class BQLParserVisitor<T>: ParseTreeVisitor<T> {
 	}
 
 	/**
+	 * Visit a parse tree produced by {@link BQLParser#contextualKeyword}.
+	- Parameters:
+	  - ctx: the parse tree
+	- returns: the visitor result
+	 */
+	internal func visitContextualKeyword(_ ctx: BQLParser.ContextualKeywordContext) -> T {
+	 	fatalError(#function + " must be overridden")
+	}
+
+	/**
 	 * Visit a parse tree produced by {@link BQLParser#constant}.
 	- Parameters:
 	  - ctx: the parse tree

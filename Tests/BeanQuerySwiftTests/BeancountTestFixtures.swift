@@ -74,6 +74,84 @@ enum BeancountTestFixtures {
         return try Loader.load(file: "test-account-functions.bean", contentProvider: provider)
     }
 
+    static func directiveTablesLedger() throws -> ParsedLedger<Cost> {
+        let provider = StringContentProvider(source: """
+        option "operating_currency" "USD"
+
+        2024-01-01 open Assets:Cash USD
+        2024-01-01 open Income:Salary USD
+        2024-01-01 open Expenses:Food USD
+
+        2024-01-10 * "Employer" "Salary" #income ^job
+          Assets:Cash      1000 USD
+          Income:Salary   -1000 USD
+
+        2024-01-12 * "Store" "Groceries" #food
+          Expenses:Food      80 USD
+          Assets:Cash       -80 USD
+
+        2024-01-15 price EUR 1.10 USD
+          source: "manual"
+
+        2024-01-16 price EUR 1.12 USD
+
+        2024-01-20 balance Assets:Cash 920 USD
+          checked: "yes"
+
+        2024-01-21 note Assets:Cash "Reconciled with statement"
+
+        2024-01-22 event "location" "Tokyo"
+        """)
+        return try Loader.load(file: "test-directive-tables.bean", contentProvider: provider)
+    }
+
+    static func bqlReferenceLedger() throws -> ParsedLedger<Cost> {
+        let provider = StringContentProvider(source: """
+        option "operating_currency" "CNY"
+
+        2026-01-01 open Assets:Cash CNY
+        2026-01-01 open Assets:Bank CNY
+        2026-01-01 open Liabilities:CreditCard CNY
+        2026-01-01 open Income:Salary CNY
+        2026-01-01 open Expenses:Food:Restaurant CNY
+        2026-01-01 open Expenses:Food:Groceries CNY
+        2026-01-01 open Expenses:Transport CNY
+        2026-01-01 open Equity:Opening-Balances CNY
+
+        2026-01-02 * "Init" "Opening"
+          Assets:Cash                  5000 CNY
+          Equity:Opening-Balances     -5000 CNY
+
+        2026-04-03 * "Salary Co" "Monthly salary"
+          Assets:Bank                  8000 CNY
+          Income:Salary               -8000 CNY
+
+        2026-04-05 * "Cafe" "Dining out"
+          payer: "Alice"
+          Expenses:Food:Restaurant      120 CNY
+          Assets:Cash                  -120 CNY
+
+        2026-04-10 * "Market" "Weekly groceries"
+          payer: "Bob"
+          Expenses:Food:Groceries       350 CNY
+          Assets:Cash                  -350 CNY
+
+        2026-04-15 * "Metro" "Subway pass"
+          Expenses:Transport             80 CNY
+          Liabilities:CreditCard        -80 CNY
+
+        2026-04-20 * "Restaurant" "Dinner"
+          payer: "Alice"
+          Expenses:Food:Restaurant      200 CNY
+          Liabilities:CreditCard       -200 CNY
+
+        2026-04-25 price USD 7.20 CNY
+        2026-04-26 price USD 7.21 CNY
+        2026-04-27 price USD 7.22 CNY
+        """)
+        return try Loader.load(file: "test-bql-reference.bean", contentProvider: provider)
+    }
+
     static func sampleBudgetSearchLedger() throws -> ParsedLedger<Cost> {
         let provider = StringContentProvider(source: """
         option "operating_currency" "CNY"

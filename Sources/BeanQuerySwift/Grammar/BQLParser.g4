@@ -52,6 +52,9 @@ tableName
   : HASH_TABLE
   | HASH_EMPTY
   | identifier
+  | BALANCES
+  | JOURNAL
+  | PRINT
   ;
 
 fromExpr
@@ -205,7 +208,7 @@ unaryExpr
   ;
 
 primaryExpr
-  : primaryExpr DOT identifier
+  : primaryExpr DOT (identifier | contextualKeyword)
   | primaryExpr LBRACK stringLiteral RBRACK
   | atomExpr
   ;
@@ -234,6 +237,13 @@ expressionList
 
 columnRef
   : identifier
+  | contextualKeyword
+  ;
+
+contextualKeyword
+  : OPEN
+  | CLOSE
+  | CLEAR
   ;
 
 constant

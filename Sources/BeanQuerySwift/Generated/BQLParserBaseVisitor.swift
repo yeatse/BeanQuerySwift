@@ -331,6 +331,13 @@ internal class BQLParserBaseVisitor<T>: AbstractParseTreeVisitor<T> {
 	 * <p>The default implementation returns the result of calling
 	 * {@link #visitChildren} on {@code ctx}.</p>
 	 */
+	internal func visitContextualKeyword(_ ctx: BQLParser.ContextualKeywordContext) -> T? { return visitChildren(ctx) }
+	/**
+	 * {@inheritDoc}
+	 *
+	 * <p>The default implementation returns the result of calling
+	 * {@link #visitChildren} on {@code ctx}.</p>
+	 */
 	internal func visitConstant(_ ctx: BQLParser.ConstantContext) -> T? { return visitChildren(ctx) }
 	/**
 	 * {@inheritDoc}

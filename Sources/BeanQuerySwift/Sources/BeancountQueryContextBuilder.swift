@@ -21,7 +21,9 @@ public enum BeancountQueryContextBuilder {
         summarizeConfig: BeancountSummarizeConfig
     ) -> QueryContext {
         let sortedDirectives = directives.sorted()
-        let staticRows = buildStaticRows(directives: sortedDirectives)
+        let staticRows = LazyResolver<(accounts: [QueryRow], commodities: [QueryRow])> {
+            buildStaticRows(directives: sortedDirectives)
+        }
         let postingsProvider = BeancountPostingsTableProvider(
             directives: sortedDirectives,
             summarizeConfig: summarizeConfig
@@ -32,15 +34,19 @@ public enum BeancountQueryContextBuilder {
         )
 
         return QueryContext(
-            tables: [
-                "accounts": staticRows.accounts,
-                "commodities": staticRows.commodities,
-            ],
+            tables: [:],
             providers: [
                 "postings": postingsProvider,
                 "entries": entriesProvider,
+                "transactions": BeancountTransactionsTableProvider(directives: sortedDirectives),
+                "prices": BeancountPricesTableProvider(directives: sortedDirectives),
+                "balances": BeancountBalancesTableProvider(directives: sortedDirectives),
+                "notes": BeancountNotesTableProvider(directives: sortedDirectives),
+                "events": BeancountEventsTableProvider(directives: sortedDirectives),
+                "accounts": BeancountAccountsTableProvider(staticRows: staticRows),
+                "commodities": BeancountCommoditiesTableProvider(staticRows: staticRows),
             ],
-            priceMap: PriceMap.build(from: sortedDirectives)
+            priceMapResolver: LazyResolver { PriceMap.build(from: sortedDirectives) }
         )
     }
 
@@ -169,31 +175,149 @@ public enum BeancountQueryContextBuilder {
         })
     }
 
+    fileprivate static func transactionsRowSequence(directives: [Directive<Cost>]) -> QueryRowSequence {
+        QueryRowSequence(makeIterator: {
+            var index = 0
+            return AnyIterator {
+                while index < directives.count {
+                    let directive = directives[index]
+                    index += 1
+                    guard case .transaction(let transaction) = directive.content else {
+                        continue
+                    }
+                    return QueryRow(storage: .beancountTransaction(
+                        BeancountTransactionQueryRow(
+                            date: directive.date,
+                            transaction: transaction,
+                            meta: .dict(runtimeMetaDictionary(from: directive.meta))
+                        )
+                    ))
+                }
+                return nil
+            }
+        })
+    }
+
+    fileprivate static func pricesRowSequence(directives: [Directive<Cost>]) -> QueryRowSequence {
+        QueryRowSequence(makeIterator: {
+            var index = 0
+            return AnyIterator {
+                while index < directives.count {
+                    let directive = directives[index]
+                    index += 1
+                    guard case .price(let price) = directive.content else {
+                        continue
+                    }
+                    return QueryRow(storage: .beancountPrice(
+                        BeancountPriceQueryRow(
+                            date: directive.date,
+                            price: price,
+                            meta: .dict(runtimeMetaDictionary(from: directive.meta))
+                        )
+                    ))
+                }
+                return nil
+            }
+        })
+    }
+
+    fileprivate static func balancesRowSequence(directives: [Directive<Cost>]) -> QueryRowSequence {
+        QueryRowSequence(makeIterator: {
+            var index = 0
+            return AnyIterator {
+                while index < directives.count {
+                    let directive = directives[index]
+                    index += 1
+                    guard case .balance(let balance) = directive.content else {
+                        continue
+                    }
+                    return QueryRow(storage: .beancountBalance(
+                        BeancountBalanceQueryRow(
+                            date: directive.date,
+                            balance: balance,
+                            meta: .dict(runtimeMetaDictionary(from: directive.meta))
+                        )
+                    ))
+                }
+                return nil
+            }
+        })
+    }
+
+    fileprivate static func notesRowSequence(directives: [Directive<Cost>]) -> QueryRowSequence {
+        QueryRowSequence(makeIterator: {
+            var index = 0
+            return AnyIterator {
+                while index < directives.count {
+                    let directive = directives[index]
+                    index += 1
+                    guard case .note(let note) = directive.content else {
+                        continue
+                    }
+                    return QueryRow(storage: .beancountNote(
+                        BeancountNoteQueryRow(
+                            date: directive.date,
+                            note: note,
+                            meta: .dict(runtimeMetaDictionary(from: directive.meta))
+                        )
+                    ))
+                }
+                return nil
+            }
+        })
+    }
+
+    fileprivate static func eventsRowSequence(directives: [Directive<Cost>]) -> QueryRowSequence {
+        QueryRowSequence(makeIterator: {
+            var index = 0
+            return AnyIterator {
+                while index < directives.count {
+                    let directive = directives[index]
+                    index += 1
+                    guard case .event(let event) = directive.content else {
+                        continue
+                    }
+                    return QueryRow(storage: .beancountEvent(
+                        BeancountEventQueryRow(
+                            date: directive.date,
+                            event: event,
+                            meta: .dict(runtimeMetaDictionary(from: directive.meta))
+                        )
+                    ))
+                }
+                return nil
+            }
+        })
+    }
+
     fileprivate static func buildStaticRows(directives: [Directive<Cost>]) -> (accounts: [QueryRow], commodities: [QueryRow]) {
-        var openByAccount: [String: Date] = [:]
-        var closeByAccount: [String: Date] = [:]
-        var openMetaByAccount: [String: RuntimeValue] = [:]
+        var openStructByAccount: [String: RuntimeValue] = [:]
+        var openDateByAccount: [String: Date] = [:]
+        var closeStructByAccount: [String: RuntimeValue] = [:]
+        var closeDateByAccount: [String: Date] = [:]
         var metaByCommodity: [String: RuntimeValue] = [:]
 
         for directive in directives {
             switch directive.content {
             case .open(let open):
                 let account = open.account.id
-                if let existing = openByAccount[account] {
-                    if directive.date < existing {
-                        openByAccount[account] = directive.date
-                        openMetaByAccount[account] = .dict(runtimeMetaDictionary(from: directive.meta))
-                    }
-                } else {
-                    openByAccount[account] = directive.date
-                    openMetaByAccount[account] = .dict(runtimeMetaDictionary(from: directive.meta))
+                let isEarlier = openDateByAccount[account].map { directive.date < $0 } ?? true
+                if isEarlier {
+                    openDateByAccount[account] = directive.date
+                    openStructByAccount[account] = openStructure(
+                        directive: directive,
+                        open: open
+                    )
                 }
             case .close(let close):
                 let account = close.account.id
-                if let existing = closeByAccount[account] {
-                    closeByAccount[account] = min(existing, directive.date)
-                } else {
-                    closeByAccount[account] = directive.date
+                let isEarlier = closeDateByAccount[account].map { directive.date < $0 } ?? true
+                if isEarlier {
+                    closeDateByAccount[account] = directive.date
+                    closeStructByAccount[account] = closeStructure(
+                        directive: directive,
+                        close: close
+                    )
                 }
             case .commodity(let commodity):
                 metaByCommodity[commodity.currency.id] = .dict(runtimeMetaDictionary(from: directive.meta))
@@ -202,14 +326,13 @@ public enum BeancountQueryContextBuilder {
             }
         }
 
-        let accounts = Set(openByAccount.keys).union(closeByAccount.keys).sorted().map { account in
+        let accounts = Set(openStructByAccount.keys).union(closeStructByAccount.keys).sorted().map { account in
             QueryRow(
                 storage: .beancountAccount(
                     BeancountAccountQueryRow(
                         account: account,
-                        openDate: openByAccount[account].map(RuntimeValue.date) ?? .null,
-                        closeDate: closeByAccount[account].map(RuntimeValue.date) ?? .null,
-                        openMeta: openMetaByAccount[account] ?? .null,
+                        open: openStructByAccount[account] ?? .null,
+                        close: closeStructByAccount[account] ?? .null,
                         type: .string(accountTypeName(account))
                     )
                 )
@@ -223,6 +346,30 @@ public enum BeancountQueryContextBuilder {
         }
 
         return (accounts: accounts, commodities: commodities)
+    }
+
+    private static func openStructure(directive: Directive<Cost>, open: Open) -> RuntimeValue {
+        var fields: [String: RuntimeValue] = [
+            "account": .string(open.account.id),
+            "date": .date(directive.date),
+            "meta": .dict(runtimeMetaDictionary(from: directive.meta)),
+            "currencies": .list(open.currencies.map { .string($0.id) }),
+        ]
+        if let booking = open.booking {
+            fields["booking"] = .string(String(describing: booking))
+        } else {
+            fields["booking"] = .null
+        }
+        return .structure(name: "Open", fields: fields)
+    }
+
+    private static func closeStructure(directive: Directive<Cost>, close: Close) -> RuntimeValue {
+        let fields: [String: RuntimeValue] = [
+            "account": .string(close.account.id),
+            "date": .date(directive.date),
+            "meta": .dict(runtimeMetaDictionary(from: directive.meta)),
+        ]
+        return .structure(name: "Close", fields: fields)
     }
 
     fileprivate static func entryTypeName(_ content: DirectiveContent<Cost>) -> String {
@@ -469,24 +616,21 @@ struct BeancountEntryQueryRow: Sendable {
 
 struct BeancountAccountQueryRow: Sendable {
     let account: String
-    let openDate: RuntimeValue
-    let closeDate: RuntimeValue
-    let openMeta: RuntimeValue
+    let open: RuntimeValue
+    let close: RuntimeValue
     let type: RuntimeValue
 
     static let wildcardColumns = [
         "account",
-        "close_date",
-        "open_date",
-        "open_meta",
+        "close",
+        "open",
         "type",
     ]
 
     private static let accessors: [String: @Sendable (BeancountAccountQueryRow) -> RuntimeValue] = [
         "account": { .string($0.account) },
-        "close_date": { $0.closeDate },
-        "open_date": { $0.openDate },
-        "open_meta": { $0.openMeta },
+        "close": { $0.close },
+        "open": { $0.open },
         "type": { $0.type },
     ]
 
@@ -579,6 +723,249 @@ private func otherAccountsValue(
 private func runtimeStringListValue<S>(_ values: S) -> RuntimeValue
 where S: Sequence, S.Element == String {
     .list(Array(Set(values)).sorted().map(RuntimeValue.string))
+}
+
+struct BeancountTransactionQueryRow: Sendable {
+    let date: Date
+    let transaction: Transaction<Cost>
+    let meta: RuntimeValue
+
+    static let wildcardColumns = [
+        "accounts",
+        "date",
+        "flag",
+        "links",
+        "narration",
+        "payee",
+        "tags",
+    ]
+
+    private static let accessors: [String: @Sendable (BeancountTransactionQueryRow) -> RuntimeValue] = [
+        "accounts": { row in
+            .list(row.transaction.postings.map { .string($0.account.id) })
+        },
+        "date": { .date($0.date) },
+        "flag": { row in
+            row.transaction.flag.map { .string(String($0)) } ?? .null
+        },
+        "links": { row in
+            runtimeStringListValue(row.transaction.links.map(\.id))
+        },
+        "meta": { $0.meta },
+        "narration": { row in
+            row.transaction.narration.map(RuntimeValue.string) ?? .null
+        },
+        "payee": { row in
+            row.transaction.payee.map(RuntimeValue.string) ?? .null
+        },
+        "tags": { row in
+            runtimeStringListValue(row.transaction.tags.map(\.id))
+        },
+    ]
+
+    func value(for column: String) -> RuntimeValue? {
+        Self.accessors[column].map { $0(self) }
+    }
+}
+
+struct BeancountPriceQueryRow: Sendable {
+    let date: Date
+    let price: Price
+    let meta: RuntimeValue
+
+    static let wildcardColumns = [
+        "amount",
+        "currency",
+        "date",
+    ]
+
+    private static let accessors: [String: @Sendable (BeancountPriceQueryRow) -> RuntimeValue] = [
+        "amount": { .amount($0.price.amount) },
+        "currency": { .string($0.price.currency.id) },
+        "date": { .date($0.date) },
+        "meta": { $0.meta },
+    ]
+
+    func value(for column: String) -> RuntimeValue? {
+        Self.accessors[column].map { $0(self) }
+    }
+}
+
+struct BeancountBalanceQueryRow: Sendable {
+    let date: Date
+    let balance: Balance
+    let meta: RuntimeValue
+
+    static let wildcardColumns = [
+        "account",
+        "amount",
+        "date",
+        "discrepancy",
+        "tolerance",
+    ]
+
+    private static let accessors: [String: @Sendable (BeancountBalanceQueryRow) -> RuntimeValue] = [
+        "account": { .string($0.balance.account.id) },
+        "amount": { .amount($0.balance.amount) },
+        "date": { .date($0.date) },
+        "discrepancy": { row in
+            row.balance.diffAmount.map(RuntimeValue.amount) ?? .null
+        },
+        "meta": { $0.meta },
+        "tolerance": { row in
+            row.balance.tolerance.map(RuntimeValue.decimal) ?? .null
+        },
+    ]
+
+    func value(for column: String) -> RuntimeValue? {
+        Self.accessors[column].map { $0(self) }
+    }
+}
+
+struct BeancountNoteQueryRow: Sendable {
+    let date: Date
+    let note: Note
+    let meta: RuntimeValue
+
+    static let wildcardColumns = [
+        "account",
+        "comment",
+        "date",
+    ]
+
+    private static let accessors: [String: @Sendable (BeancountNoteQueryRow) -> RuntimeValue] = [
+        "account": { .string($0.note.account.id) },
+        "comment": { .string($0.note.note) },
+        "date": { .date($0.date) },
+        "meta": { $0.meta },
+    ]
+
+    func value(for column: String) -> RuntimeValue? {
+        Self.accessors[column].map { $0(self) }
+    }
+}
+
+struct BeancountEventQueryRow: Sendable {
+    let date: Date
+    let event: Event
+    let meta: RuntimeValue
+
+    static let wildcardColumns = [
+        "date",
+        "description",
+        "type",
+    ]
+
+    private static let accessors: [String: @Sendable (BeancountEventQueryRow) -> RuntimeValue] = [
+        "date": { .date($0.date) },
+        "description": { .string($0.event.description) },
+        "meta": { $0.meta },
+        "type": { .string($0.event.type) },
+    ]
+
+    func value(for column: String) -> RuntimeValue? {
+        Self.accessors[column].map { $0(self) }
+    }
+}
+
+private struct BeancountAccountsTableProvider: QueryTableProvider {
+    var staticRows: LazyResolver<(accounts: [QueryRow], commodities: [QueryRow])>
+
+    func rows(for qualifiers: EvalQualifiers?) throws -> QueryRowSequence {
+        try requireNoQualifiers(qualifiers, table: "accounts")
+        return QueryRowSequence(staticRows.value.accounts)
+    }
+
+    func wildcardColumns(for qualifiers: EvalQualifiers?) throws -> [String] {
+        BeancountAccountQueryRow.wildcardColumns
+    }
+}
+
+private struct BeancountCommoditiesTableProvider: QueryTableProvider {
+    var staticRows: LazyResolver<(accounts: [QueryRow], commodities: [QueryRow])>
+
+    func rows(for qualifiers: EvalQualifiers?) throws -> QueryRowSequence {
+        try requireNoQualifiers(qualifiers, table: "commodities")
+        return QueryRowSequence(staticRows.value.commodities)
+    }
+
+    func wildcardColumns(for qualifiers: EvalQualifiers?) throws -> [String] {
+        ["currency", "meta"]
+    }
+}
+
+private struct BeancountTransactionsTableProvider: QueryTableProvider {
+    var directives: [Directive<Cost>]
+
+    func rows(for qualifiers: EvalQualifiers?) throws -> QueryRowSequence {
+        try requireNoQualifiers(qualifiers, table: "transactions")
+        return BeancountQueryContextBuilder.transactionsRowSequence(directives: directives)
+    }
+
+    func wildcardColumns(for qualifiers: EvalQualifiers?) throws -> [String] {
+        BeancountTransactionQueryRow.wildcardColumns
+    }
+}
+
+private struct BeancountPricesTableProvider: QueryTableProvider {
+    var directives: [Directive<Cost>]
+
+    func rows(for qualifiers: EvalQualifiers?) throws -> QueryRowSequence {
+        try requireNoQualifiers(qualifiers, table: "prices")
+        return BeancountQueryContextBuilder.pricesRowSequence(directives: directives)
+    }
+
+    func wildcardColumns(for qualifiers: EvalQualifiers?) throws -> [String] {
+        BeancountPriceQueryRow.wildcardColumns
+    }
+}
+
+private struct BeancountBalancesTableProvider: QueryTableProvider {
+    var directives: [Directive<Cost>]
+
+    func rows(for qualifiers: EvalQualifiers?) throws -> QueryRowSequence {
+        try requireNoQualifiers(qualifiers, table: "balances")
+        return BeancountQueryContextBuilder.balancesRowSequence(directives: directives)
+    }
+
+    func wildcardColumns(for qualifiers: EvalQualifiers?) throws -> [String] {
+        BeancountBalanceQueryRow.wildcardColumns
+    }
+}
+
+private struct BeancountNotesTableProvider: QueryTableProvider {
+    var directives: [Directive<Cost>]
+
+    func rows(for qualifiers: EvalQualifiers?) throws -> QueryRowSequence {
+        try requireNoQualifiers(qualifiers, table: "notes")
+        return BeancountQueryContextBuilder.notesRowSequence(directives: directives)
+    }
+
+    func wildcardColumns(for qualifiers: EvalQualifiers?) throws -> [String] {
+        BeancountNoteQueryRow.wildcardColumns
+    }
+}
+
+private struct BeancountEventsTableProvider: QueryTableProvider {
+    var directives: [Directive<Cost>]
+
+    func rows(for qualifiers: EvalQualifiers?) throws -> QueryRowSequence {
+        try requireNoQualifiers(qualifiers, table: "events")
+        return BeancountQueryContextBuilder.eventsRowSequence(directives: directives)
+    }
+
+    func wildcardColumns(for qualifiers: EvalQualifiers?) throws -> [String] {
+        BeancountEventQueryRow.wildcardColumns
+    }
+}
+
+private func requireNoQualifiers(_ qualifiers: EvalQualifiers?, table: String) throws {
+    guard let qualifiers else {
+        return
+    }
+    if qualifiers.open != nil || qualifiers.close != nil || qualifiers.clear {
+        throw BQLExecutionError.qualifiersUnsupported(table)
+    }
 }
 
 private struct BeancountPostingsTableProvider: QueryTableProvider {
