@@ -1375,7 +1375,7 @@ struct BuiltinFunctionEvaluator {
         if let provider = context.provider(named: "commodities"),
            let rows = try? provider.rows(for: nil) {
             for row in rows {
-                if case .string(let commodityName) = row["currency"], commodityName == commodity {
+                if case .string(let commodityName) = row["name"], commodityName == commodity {
                     return row
                 }
             }
@@ -1387,7 +1387,7 @@ struct BuiltinFunctionEvaluator {
         }
 
         return commodities.first { row in
-            guard case .string(let commodityName) = row["currency"] else {
+            guard case .string(let commodityName) = row["name"] else {
                 return false
             }
             return commodityName == commodity

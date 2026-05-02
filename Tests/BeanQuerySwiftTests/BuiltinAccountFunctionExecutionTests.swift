@@ -130,7 +130,7 @@ struct BuiltinAccountFunctionExecutionTests {
             in: context
         )
         #expect(postingResult.columns == ["has_assets"])
-        #expect(postingResult.rows == [[.bool(false)]])
+        #expect(postingResult.rows == [[.bool(true)]])
     }
 
     @Test func runFindfirstFunction() throws {
