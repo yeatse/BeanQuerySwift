@@ -148,6 +148,36 @@ struct BeancountSourceAdapterTests {
         #expect(secondBalance == expectedSecond)
     }
 
+    @Test func runBalanceColumnIsPerAccountAcrossInterleavedPostings() throws {
+        let context = BeancountQueryContextBuilder.makeContext(from: try BeancountTestFixtures.sampleLedger())
+        let result = try engine.run(
+            "SELECT account, balance FROM postings ORDER BY date, account",
+            in: context
+        )
+
+        let inventories = result.rows.map { row -> (String, Inventory) in
+            guard case .string(let account) = row[0],
+                  case .inventory(let balance) = row[1]
+            else {
+                Issue.record("expected (account, inventory) tuple in row \(row)")
+                return ("", Inventory())
+            }
+            return (account, balance)
+        }
+
+        let cashSnapshots = inventories.filter { $0.0 == "Assets:Cash" }.map(\.1)
+        let salarySnapshots = inventories.filter { $0.0 == "Income:Salary" }.map(\.1)
+        let foodSnapshots = inventories.filter { $0.0 == "Expenses:Food" }.map(\.1)
+
+        let expectedCash: [Inventory] = ["1000 USD", "920 USD"]
+        let expectedSalary: [Inventory] = ["-1000 USD"]
+        let expectedFood: [Inventory] = ["80 USD"]
+
+        #expect(cashSnapshots == expectedCash)
+        #expect(salarySnapshots == expectedSalary)
+        #expect(foodSnapshots == expectedFood)
+    }
+
     @Test func runCostLabelDefaultsToEmptyStringWhenCostIsMissing() throws {
         let context = BeancountQueryContextBuilder.makeContext(from: try BeancountTestFixtures.sampleLedger())
         let result = try engine.run(
@@ -342,7 +372,7 @@ struct BeancountSourceAdapterTests {
         #expect(balances.columns == ["account", "amount", "date", "discrepancy", "tolerance"])
 
         let notes = try engine.run("SELECT * FROM notes", in: context)
-        #expect(notes.columns == ["account", "comment", "date"])
+        #expect(notes.columns == ["account", "comment", "date", "links", "tags"])
 
         let events = try engine.run("SELECT * FROM events", in: context)
         #expect(events.columns == ["date", "description", "type"])
