@@ -49,6 +49,14 @@ struct BuiltinFunctionEvaluator {
         arguments values: [RuntimeValue],
         row: QueryRow?
     ) throws -> RuntimeValue {
+        // Mirror beanquery's EvalFunction null propagation: a function applied
+        // to a null argument yields null without being invoked (query_env.py).
+        // `getitem` is the only scalar builtin with custom null handling (it
+        // propagates only on its container argument), so it opts out here.
+        if normalizedName != "getitem", values.contains(.null) {
+            return .null
+        }
+
         switch normalizedName {
         case "getitem":
             guard values.count == 2 || values.count == 3 else {

@@ -153,6 +153,20 @@ struct BuiltinFunctionExecutionTests {
         #expect(result.rows == [[.decimal(Decimal(120))]])
     }
 
+    @Test func runGetPriceWithNullArgumentReturnsNull() throws {
+        // Postings without a cost have a null cost_currency. Like Python
+        // beanquery, applying getprice to a null argument must yield null
+        // instead of raising a type error.
+        let context = BeancountQueryContextBuilder.makeContext(from: try BeancountTestFixtures.sampleLedger())
+        let result = try engine.run(
+            "SELECT first(getprice(currency, cost_currency)) AS px FROM postings WHERE account = 'Assets:Cash' GROUP BY account",
+            in: context
+        )
+
+        #expect(result.columns == ["px"])
+        #expect(result.rows == [[.null]])
+    }
+
     @Test func runPossignFunction() throws {
         let context = BeancountQueryContextBuilder.makeContext(from: try BeancountTestFixtures.sampleLedger())
         let result = try engine.run(
