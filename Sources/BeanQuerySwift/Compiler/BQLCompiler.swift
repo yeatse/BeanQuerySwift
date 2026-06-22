@@ -707,10 +707,15 @@ struct BQLCompiler {
 
         if let groupBy {
             var indexes: [Int] = []
-            let targetNames: [String: Int] = Dictionary(uniqueKeysWithValues: newTargets.enumerated().compactMap { index, target in
-                guard let name = target.name else { return nil }
-                return (name, index)
-            })
+            // Multiple targets may share the same name, so keep the first
+            // occurrence instead of trapping on duplicate keys.
+            let targetNames: [String: Int] = Dictionary(
+                newTargets.enumerated().compactMap { index, target in
+                    guard let name = target.name else { return nil }
+                    return (name, index)
+                },
+                uniquingKeysWith: { first, _ in first }
+            )
 
             for item in groupBy.items {
                 let index: Int
@@ -796,10 +801,15 @@ struct BQLCompiler {
         let visibleIndexes = targets.enumerated().compactMap { index, target in
             target.name == nil ? nil : index
         }
-        let targetNames: [String: Int] = Dictionary(uniqueKeysWithValues: targets.enumerated().compactMap { index, target in
-            guard let name = target.name else { return nil }
-            return (name, index)
-        })
+        // Targets may share names; keep the first occurrence rather than
+        // trapping on duplicate keys.
+        let targetNames: [String: Int] = Dictionary(
+            targets.enumerated().compactMap { index, target in
+                guard let name = target.name else { return nil }
+                return (name, index)
+            },
+            uniquingKeysWith: { first, _ in first }
+        )
 
         var specs: [EvalOrderSpec] = []
 
@@ -856,10 +866,15 @@ struct BQLCompiler {
         let visibleIndexes = targets.enumerated().compactMap { index, target in
             target.name == nil ? nil : index
         }
-        let names: [String: Int] = Dictionary(uniqueKeysWithValues: targets.enumerated().compactMap { index, target in
-            guard let name = target.name else { return nil }
-            return (name, index)
-        })
+        // Targets may share names; keep the first occurrence rather than
+        // trapping on duplicate keys.
+        let names: [String: Int] = Dictionary(
+            targets.enumerated().compactMap { index, target in
+                guard let name = target.name else { return nil }
+                return (name, index)
+            },
+            uniquingKeysWith: { first, _ in first }
+        )
 
         var indexes: [Int] = []
 
