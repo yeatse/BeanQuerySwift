@@ -165,6 +165,15 @@ struct BQLCompilerTests {
         #expect(compiled.pivotIndexes == [0, 1])
     }
 
+    @Test func compileGroupByWithDuplicateTargetNames() throws {
+        // Two targets share the name "account"; building the name->index
+        // lookup must not trap on the duplicate key.
+        let compiled = try engine.compile(
+            "SELECT account, account, sum(number) FROM #postings GROUP BY 1, 2"
+        )
+        #expect(compiled.groupIndexes == [0, 1])
+    }
+
     @Test func compileInvalidGroupByIndexFails() throws {
         do {
             _ = try engine.compile("SELECT account, sum(number) FROM #postings GROUP BY 3")
