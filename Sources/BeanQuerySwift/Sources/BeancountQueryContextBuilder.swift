@@ -199,7 +199,6 @@ public enum BeancountQueryContextBuilder {
                     }
                     return QueryRow(storage: .beancountTransaction(
                         BeancountTransactionQueryRow(
-                            directive: directive,
                             date: directive.date,
                             transaction: transaction,
                             meta: .dict(runtimeMetaDictionary(from: directive.meta))
@@ -791,7 +790,6 @@ where S: Sequence, S.Element == String {
 }
 
 struct BeancountTransactionQueryRow: Sendable {
-    let directive: Directive<Cost>
     let date: Date
     let transaction: Transaction<Cost>
     let meta: RuntimeValue
@@ -799,9 +797,7 @@ struct BeancountTransactionQueryRow: Sendable {
     static let wildcardColumns = [
         "accounts",
         "date",
-        "filename",
         "flag",
-        "lineno",
         "links",
         "narration",
         "payee",
@@ -813,11 +809,9 @@ struct BeancountTransactionQueryRow: Sendable {
             .list(row.transaction.postings.map { .string($0.account.id) })
         },
         "date": { .date($0.date) },
-        "filename": { $0.directive.meta.filename.map(RuntimeValue.string) ?? .null },
         "flag": { row in
             row.transaction.flag.map { .string(String($0)) } ?? .null
         },
-        "lineno": { $0.directive.meta.lineno.map { .int(Int($0)) } ?? .null },
         "links": { row in
             runtimeStringListValue(row.transaction.links.map(\.id))
         },

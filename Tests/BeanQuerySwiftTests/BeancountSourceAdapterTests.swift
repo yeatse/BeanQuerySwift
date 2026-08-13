@@ -293,23 +293,19 @@ struct BeancountSourceAdapterTests {
     @Test func runQueryAgainstTransactionsTable() throws {
         let context = BeancountQueryContextBuilder.makeContext(from: try BeancountTestFixtures.directiveTablesLedger())
         let result = try engine.run(
-            "SELECT date, payee, narration, flag, accounts, tags, filename, lineno FROM #transactions ORDER BY date",
+            "SELECT date, payee, narration, flag, accounts, tags FROM transactions ORDER BY date",
             in: context
         )
 
-        #expect(result.columns == ["date", "payee", "narration", "flag", "accounts", "tags", "filename", "lineno"])
+        #expect(result.columns == ["date", "payee", "narration", "flag", "accounts", "tags"])
         #expect(result.rows.count == 2)
         #expect(result.rows[0][1] == .string("Employer"))
         #expect(result.rows[0][2] == .string("Salary"))
         #expect(result.rows[0][3] == .string("*"))
         #expect(result.rows[0][4] == .list([.string("Assets:Cash"), .string("Income:Salary")]))
         #expect(result.rows[0][5] == .list([.string("income")]))
-        #expect(result.rows[0][6] == .string("test-directive-tables.bean"))
-        #expect(result.rows[0][7] == .int(6))
         #expect(result.rows[1][1] == .string("Store"))
         #expect(result.rows[1][4] == .list([.string("Expenses:Food"), .string("Assets:Cash")]))
-        #expect(result.rows[1][6] == .string("test-directive-tables.bean"))
-        #expect(result.rows[1][7] == .int(10))
     }
 
     @Test func runQueryAgainstPricesTable() throws {
@@ -382,9 +378,7 @@ struct BeancountSourceAdapterTests {
         #expect(events.columns == ["date", "description", "type"])
 
         let transactions = try engine.run("SELECT * FROM transactions", in: context)
-        #expect(transactions.columns == [
-            "accounts", "date", "filename", "flag", "lineno", "links", "narration", "payee", "tags",
-        ])
+        #expect(transactions.columns == ["accounts", "date", "flag", "links", "narration", "payee", "tags"])
     }
 
     @Test func runBudgetSearchQueriesLikeBeanQuery() throws {
