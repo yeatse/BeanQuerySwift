@@ -1,4 +1,5 @@
 import Foundation
+import Synchronization
 import BeancountSwift
 
 public enum BeancountQueryContextBuilder {
@@ -56,8 +57,11 @@ public enum BeancountQueryContextBuilder {
         QueryRowSequence(makeIterator: {
             var directiveIndex = 0
             var postingIndex = 0
+            var rowID = 0
             var currentDirectiveContext: PostingDirectiveContext?
-            var perAccountBalance: [String: Inventory] = [:]
+            // One accumulator per iteration, so re-running a query starts from zero.
+            let ids = DirectiveIDCache()
+            let balances = PostingBalanceAccumulator()
             let calendar = Calendar(identifier: .gregorian)
             let dateComponents: Set<Calendar.Component> = [.year, .month, .day]
 
@@ -74,21 +78,10 @@ public enum BeancountQueryContextBuilder {
                         currentDirectiveContext = PostingDirectiveContext(
                             directive: directive,
                             transaction: transaction,
-                            id: directiveIndex,
+                            directiveIndex: directiveIndex,
                             year: components.year ?? 0,
                             month: components.month ?? 0,
-                            day: components.day ?? 0,
-                            flag: transaction.flag.map { RuntimeValue.string(String($0)) } ?? .null,
-                            payee: transaction.payee.map(RuntimeValue.string) ?? .null,
-                            narration: transaction.narration.map(RuntimeValue.string) ?? .null,
-                            description: descriptionValue(
-                                payee: transaction.payee,
-                                narration: transaction.narration
-                            ),
-                            tags: runtimeStringListValue(transaction.tags.map(\.id)),
-                            links: runtimeStringListValue(transaction.links.map(\.id)),
-                            accounts: .list(transaction.postings.map { .string($0.account.id) }),
-                            entryMeta: .dict(runtimeMetaDictionary(from: directive.meta))
+                            day: components.day ?? 0
                         )
                         postingIndex = 0
                     }
@@ -101,36 +94,22 @@ public enum BeancountQueryContextBuilder {
                         let currentPostingIndex = postingIndex
                         let posting = directiveContext.transaction.postings[postingIndex]
                         postingIndex += 1
-                        let accountID = posting.account.id
-                        var accountBalance = perAccountBalance[accountID] ?? Inventory()
-                        _ = accountBalance.addAmount(posting.units, cost: posting.cost)
-                        perAccountBalance[accountID] = accountBalance
+                        rowID += 1
                         return QueryRow(
                             storage: .beancountPosting(
                                 BeancountPostingQueryRow(
                                     directive: directiveContext.directive,
-                                    id: directiveContext.id,
+                                    transaction: directiveContext.transaction,
+                                    directiveIndex: directiveContext.directiveIndex,
+                                    rowID: rowID,
                                     date: directiveContext.directive.date,
                                     year: directiveContext.year,
                                     month: directiveContext.month,
                                     day: directiveContext.day,
                                     posting: posting,
-                                    position: Position(posting: posting),
-                                    balance: .inventory(accountBalance),
-                                    flag: directiveContext.flag,
-                                    postingFlag: posting.flag.map { RuntimeValue.string(String($0)) } ?? .null,
-                                    payee: directiveContext.payee,
-                                    narration: directiveContext.narration,
-                                    description: directiveContext.description,
-                                    tags: directiveContext.tags,
-                                    links: directiveContext.links,
-                                    accounts: directiveContext.accounts,
-                                    otherAccounts: otherAccountsValue(
-                                        in: directiveContext.transaction,
-                                        excludingPostingAt: currentPostingIndex
-                                    ),
-                                    meta: posting.meta.map { .dict(runtimeMetaDictionary(from: $0)) } ?? .null,
-                                    entryMeta: directiveContext.entryMeta
+                                    postingIndex: currentPostingIndex,
+                                    ids: ids,
+                                    balances: balances
                                 )
                             )
                         )
@@ -148,6 +127,7 @@ public enum BeancountQueryContextBuilder {
     fileprivate static func entriesRowSequence(directives: [Directive<Cost>]) -> QueryRowSequence {
         QueryRowSequence(makeIterator: {
             var index = 0
+            let ids = DirectiveIDCache()
             let calendar = Calendar(identifier: .gregorian)
             let dateComponents: Set<Calendar.Component> = [.year, .month, .day]
 
@@ -160,27 +140,16 @@ public enum BeancountQueryContextBuilder {
                 defer { index += 1 }
 
                 let components = calendar.dateComponents(dateComponents, from: directive.date)
-                let metaValue: RuntimeValue = .dict(runtimeMetaDictionary(from: directive.meta))
                 return QueryRow(
                     storage: .beancountEntry(
                         BeancountEntryQueryRow(
                             directive: directive,
-                            id: index,
+                            directiveIndex: index,
+                            ids: ids,
                             date: directive.date,
                             year: components.year ?? 0,
                             month: components.month ?? 0,
-                            day: components.day ?? 0,
-                            type: entryTypeName(directive.content),
-                            meta: metaValue,
-                            entryMeta: metaValue,
-                            flag: flagValue(for: directive),
-                            payee: payeeValue(for: directive),
-                            narration: narrationValue(for: directive),
-                            description: entryDescriptionValue(for: directive),
-                            tags: tagsValue(for: directive),
-                            links: linksValue(for: directive),
-                            account: accountValue(for: directive),
-                            accounts: accountsValue(for: directive)
+                            day: components.day ?? 0
                         )
                     )
                 )
@@ -514,74 +483,101 @@ public enum BeancountQueryContextBuilder {
 private struct PostingDirectiveContext {
     let directive: Directive<Cost>
     let transaction: Transaction<Cost>
-    let id: Int
+    let directiveIndex: Int
     let year: Int
     let month: Int
     let day: Int
-    let flag: RuntimeValue
-    let payee: RuntimeValue
-    let narration: RuntimeValue
-    let description: RuntimeValue
-    let tags: RuntimeValue
-    let links: RuntimeValue
-    let accounts: RuntimeValue
-    let entryMeta: RuntimeValue
+}
+
+/// Process-stable string identity for a directive, backing the `id` column.
+///
+/// beancount derives `id` from the directive's contents (an md5 over its
+/// fields, metadata included), so the same directive keeps the same id no
+/// matter which query or `FROM` qualifier produced the row. We only need that
+/// stability within one process, which lets us use Swift's seeded `Hashable`
+/// instead of a cryptographic digest: same value for the same directive within
+/// a run, different between runs.
+///
+/// Hashing a directive walks its whole contents (~3µs for a transaction), so
+/// the column is computed on read — never during row construction — and
+/// memoized for the directive currently being scanned. That last part matters
+/// for `postings`, where every posting of a transaction reports its parent's
+/// id and rows arrive grouped by directive.
+final class DirectiveIDCache: Sendable {
+    private struct Memo {
+        var index = -1
+        var id = ""
+    }
+
+    private let memo = Mutex(Memo())
+
+    func id(index: Int, of directive: @autoclosure () -> Directive<Cost>) -> String {
+        memo.withLock { memo in
+            if index == memo.index {
+                return memo.id
+            }
+            let digits = String(UInt(bitPattern: directive().hashValue), radix: 16)
+            memo.id = String(repeating: "0", count: max(0, 16 - digits.count)) + digits
+            memo.index = index
+            return memo.id
+        }
+    }
+}
+
+/// Running inventory backing the `balance` column of the `postings` table.
+///
+/// Beancount computes `balance` lazily: a single inventory accumulates over the
+/// rows that actually reach the column, in scan order, so filtered-out rows do
+/// not contribute. Repeated reads of the same row must not advance it, which is
+/// what `lastRowID` guards.
+final class PostingBalanceAccumulator: Sendable {
+    private struct State {
+        var running = Inventory()
+        var lastRowID = 0
+        var cached: RuntimeValue = .inventory(Inventory())
+    }
+
+    private let state = Mutex(State())
+
+    func value(rowID: Int, posting: Posting<Cost>) -> RuntimeValue {
+        state.withLock { state in
+            if rowID == state.lastRowID {
+                return state.cached
+            }
+            _ = state.running.addAmount(posting.units, cost: posting.cost)
+            state.lastRowID = rowID
+            state.cached = .inventory(state.running)
+            return state.cached
+        }
+    }
 }
 
 struct BeancountPostingQueryRow: Sendable {
     let directive: Directive<Cost>
-    let id: Int
+    let transaction: Transaction<Cost>
+    let directiveIndex: Int
+    let rowID: Int
     let date: Date
     let year: Int
     let month: Int
     let day: Int
     let posting: Posting<Cost>
-    let position: Position
-    let balance: RuntimeValue
-    let flag: RuntimeValue
-    let postingFlag: RuntimeValue
-    let payee: RuntimeValue
-    let narration: RuntimeValue
-    let description: RuntimeValue
-    let tags: RuntimeValue
-    let links: RuntimeValue
-    let accounts: RuntimeValue
-    let otherAccounts: RuntimeValue
-    let meta: RuntimeValue
-    let entryMeta: RuntimeValue
+    let postingIndex: Int
+    let ids: DirectiveIDCache
+    let balances: PostingBalanceAccumulator
 
     static let wildcardColumns = [
-        "account",
-        "balance",
-        "cost_currency",
-        "cost_date",
-        "cost_label",
-        "cost_number",
-        "currency",
         "date",
-        "day",
-        "description",
-        "entry_meta",
         "flag",
-        "links",
-        "meta",
-        "month",
-        "narration",
-        "number",
-        "other_accounts",
         "payee",
-        "posting_flag",
+        "narration",
         "position",
-        "price",
-        "tags",
-        "weight",
-        "year",
     ]
 
     private static let accessors: [String: @Sendable (BeancountPostingQueryRow) -> RuntimeValue] = [
         "account": { .string($0.posting.account.id) },
-        "accounts": { $0.accounts },
-        "balance": { $0.balance },
+        "accounts": { .list($0.transaction.postings.map { .string($0.account.id) }) },
+        "balance": { $0.balances.value(rowID: $0.rowID, posting: $0.posting) },
         "cost_currency": { row in
             row.posting.cost.map { .string($0.currency.id) } ?? .null
         },
@@ -597,33 +593,40 @@ struct BeancountPostingQueryRow: Sendable {
         "currency": { .string($0.posting.units.currency.id) },
         "date": { .date($0.date) },
         "day": { .int($0.day) },
-        "description": { $0.description },
+        "description": { row in
+            BeancountQueryContextBuilder.descriptionValue(
+                payee: row.transaction.payee,
+                narration: row.transaction.narration
+            )
+        },
         "entry": { .directive($0.directive) },
-        "entry_meta": { $0.entryMeta },
+        "entry_meta": { .dict(BeancountQueryContextBuilder.runtimeMetaDictionary(from: $0.directive.meta)) },
         "filename": { row in
             (row.posting.meta?.filename ?? row.directive.meta.filename).map(RuntimeValue.string) ?? .null
         },
-        "flag": { $0.flag },
-        "id": { .int($0.id) },
+        "flag": { $0.transaction.flag.map { .string(String($0)) } ?? .null },
+        "id": { .string($0.ids.id(index: $0.directiveIndex, of: $0.directive)) },
         "lineno": { row in
             (row.posting.meta?.lineno ?? row.directive.meta.lineno).map { .int(Int($0)) } ?? .null
         },
-        "links": { $0.links },
+        "links": { runtimeStringListValue($0.transaction.links.map(\.id)) },
         "location": { row in
             let meta = row.posting.meta ?? row.directive.meta
             guard let filename = meta.filename, let lineno = meta.lineno else { return .null }
             return .string("\(filename):\(lineno):")
         },
-        "meta": { $0.meta },
+        "meta": { $0.posting.meta.map { .dict(BeancountQueryContextBuilder.runtimeMetaDictionary(from: $0)) } ?? .null },
         "month": { .int($0.month) },
-        "narration": { $0.narration },
+        "narration": { $0.transaction.narration.map(RuntimeValue.string) ?? .null },
         "number": { .decimal($0.posting.units.number) },
-        "other_accounts": { $0.otherAccounts },
-        "payee": { $0.payee },
-        "posting_flag": { $0.postingFlag },
-        "position": { .position($0.position) },
+        "other_accounts": { row in
+            otherAccountsValue(in: row.transaction, excludingPostingAt: row.postingIndex)
+        },
+        "payee": { $0.transaction.payee.map(RuntimeValue.string) ?? .null },
+        "posting_flag": { $0.posting.flag.map { .string(String($0)) } ?? .null },
+        "position": { .position(Position(posting: $0.posting)) },
         "price": { $0.posting.price.map(RuntimeValue.amount) ?? .null },
-        "tags": { $0.tags },
+        "tags": { runtimeStringListValue($0.transaction.tags.map(\.id)) },
         "type": { _ in .string("transaction") },
         "weight": { .amount($0.posting.weight) },
         "year": { .int($0.year) },
@@ -636,64 +639,51 @@ struct BeancountPostingQueryRow: Sendable {
 
 struct BeancountEntryQueryRow: Sendable {
     let directive: Directive<Cost>
-    let id: Int
+    let directiveIndex: Int
+    let ids: DirectiveIDCache
     let date: Date
     let year: Int
     let month: Int
     let day: Int
-    let type: String
-    let meta: RuntimeValue
-    let entryMeta: RuntimeValue
-    let flag: RuntimeValue
-    let payee: RuntimeValue
-    let narration: RuntimeValue
-    let description: RuntimeValue
-    let tags: RuntimeValue
-    let links: RuntimeValue
-    let account: RuntimeValue
-    let accounts: RuntimeValue
 
     static let wildcardColumns = [
-        "account",
-        "accounts",
-        "date",
-        "day",
-        "description",
-        "entry",
-        "entry_meta",
-        "filename",
-        "flag",
         "id",
+        "type",
+        "filename",
         "lineno",
+        "date",
+        "year",
+        "month",
+        "day",
+        "flag",
+        "payee",
+        "narration",
+        "description",
+        "tags",
         "links",
         "meta",
-        "month",
-        "narration",
-        "payee",
-        "tags",
-        "type",
-        "year",
+        "accounts",
     ]
 
     private static let accessors: [String: @Sendable (BeancountEntryQueryRow) -> RuntimeValue] = [
-        "account": { $0.account },
-        "accounts": { $0.accounts },
+        "account": { accountValue(for: $0.directive) },
+        "accounts": { accountsValue(for: $0.directive) },
         "date": { .date($0.date) },
         "day": { .int($0.day) },
-        "description": { $0.description },
+        "description": { entryDescriptionValue(for: $0.directive) },
         "entry": { .directive($0.directive) },
-        "entry_meta": { $0.entryMeta },
+        "entry_meta": { .dict(BeancountQueryContextBuilder.runtimeMetaDictionary(from: $0.directive.meta)) },
         "filename": { $0.directive.meta.filename.map(RuntimeValue.string) ?? .null },
-        "flag": { $0.flag },
-        "id": { .int($0.id) },
+        "flag": { flagValue(for: $0.directive) },
+        "id": { .string($0.ids.id(index: $0.directiveIndex, of: $0.directive)) },
         "lineno": { $0.directive.meta.lineno.map { .int(Int($0)) } ?? .null },
-        "links": { $0.links },
-        "meta": { $0.meta },
+        "links": { linksValue(for: $0.directive) },
+        "meta": { .dict(BeancountQueryContextBuilder.runtimeMetaDictionary(from: $0.directive.meta)) },
         "month": { .int($0.month) },
-        "narration": { $0.narration },
-        "payee": { $0.payee },
-        "tags": { $0.tags },
-        "type": { .string($0.type) },
+        "narration": { narrationValue(for: $0.directive) },
+        "payee": { payeeValue(for: $0.directive) },
+        "tags": { tagsValue(for: $0.directive) },
+        "type": { .string(BeancountQueryContextBuilder.entryTypeName($0.directive.content)) },
         "year": { .int($0.year) },
     ]
 
@@ -710,9 +700,8 @@ struct BeancountAccountQueryRow: Sendable {
 
     static let wildcardColumns = [
         "account",
-        "close",
         "open",
-        "type",
+        "close",
     ]
 
     private static let accessors: [String: @Sendable (BeancountAccountQueryRow) -> RuntimeValue] = [
@@ -819,13 +808,13 @@ struct BeancountTransactionQueryRow: Sendable {
     let meta: RuntimeValue
 
     static let wildcardColumns = [
-        "accounts",
         "date",
         "flag",
-        "links",
-        "narration",
         "payee",
+        "narration",
         "tags",
+        "links",
+        "accounts",
     ]
 
     private static let accessors: [String: @Sendable (BeancountTransactionQueryRow) -> RuntimeValue] = [
@@ -862,9 +851,9 @@ struct BeancountPriceQueryRow: Sendable {
     let meta: RuntimeValue
 
     static let wildcardColumns = [
-        "amount",
-        "currency",
         "date",
+        "currency",
+        "amount",
     ]
 
     private static let accessors: [String: @Sendable (BeancountPriceQueryRow) -> RuntimeValue] = [
@@ -885,11 +874,11 @@ struct BeancountBalanceQueryRow: Sendable {
     let meta: RuntimeValue
 
     static let wildcardColumns = [
+        "date",
         "account",
         "amount",
-        "date",
-        "discrepancy",
         "tolerance",
+        "discrepancy",
     ]
 
     private static let accessors: [String: @Sendable (BeancountBalanceQueryRow) -> RuntimeValue] = [
@@ -916,11 +905,11 @@ struct BeancountNoteQueryRow: Sendable {
     let meta: RuntimeValue
 
     static let wildcardColumns = [
+        "date",
         "account",
         "comment",
-        "date",
-        "links",
         "tags",
+        "links",
     ]
 
     private static let accessors: [String: @Sendable (BeancountNoteQueryRow) -> RuntimeValue] = [
@@ -944,8 +933,8 @@ struct BeancountEventQueryRow: Sendable {
 
     static let wildcardColumns = [
         "date",
-        "description",
         "type",
+        "description",
     ]
 
     private static let accessors: [String: @Sendable (BeancountEventQueryRow) -> RuntimeValue] = [
@@ -966,11 +955,11 @@ struct BeancountDocumentQueryRow: Sendable {
     let meta: RuntimeValue
 
     static let wildcardColumns = [
-        "account",
         "date",
+        "account",
         "filename",
-        "links",
         "tags",
+        "links",
     ]
 
     private static let accessors: [String: @Sendable (BeancountDocumentQueryRow) -> RuntimeValue] = [
@@ -1064,7 +1053,7 @@ private struct BeancountCommoditiesTableProvider: QueryTableProvider {
     }
 
     func wildcardColumns(for qualifiers: EvalQualifiers?) throws -> [String] {
-        ["date", "name"]
+        ["meta", "date", "name"]
     }
 }
 
@@ -1156,7 +1145,7 @@ private struct BeancountPostingsTableProvider: QueryTableProvider {
     }
 
     func wildcardColumns(for qualifiers: EvalQualifiers?) throws -> [String] {
-        BeancountPostingQueryRow.wildcardColumns.sorted()
+        BeancountPostingQueryRow.wildcardColumns
     }
 }
 
@@ -1174,7 +1163,7 @@ private struct BeancountEntriesTableProvider: QueryTableProvider {
     }
 
     func wildcardColumns(for qualifiers: EvalQualifiers?) throws -> [String] {
-        BeancountEntryQueryRow.wildcardColumns.sorted()
+        BeancountEntryQueryRow.wildcardColumns
     }
 }
 

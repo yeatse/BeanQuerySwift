@@ -154,34 +154,98 @@ struct BeancountSourceAdapterTests {
         #expect(secondBalance == expectedSecond)
     }
 
-    @Test func runBalanceColumnIsPerAccountAcrossInterleavedPostings() throws {
+    /// `balance` is a single running inventory over the rows that reach the
+    /// column, in scan order — not a per-account running total. Ground truth,
+    /// `bean-query` on the same ledger:
+    ///
+    /// ```
+    ///    account     numbe   balance
+    /// -------------  -----  ---------
+    /// Assets:Cash     1000   1000 USD
+    /// Income:Salary  -1000
+    /// Expenses:Food     80     80 USD
+    /// Assets:Cash      -80
+    /// ```
+    @Test func runBalanceColumnIsSingleRunningInventoryInScanOrder() throws {
+        let context = BeancountQueryContextBuilder.makeContext(from: try BeancountTestFixtures.sampleLedger())
+        let result = try engine.run("SELECT account, balance FROM postings", in: context)
+
+        let expected: [(String, Inventory)] = [
+            ("Assets:Cash", "1000 USD"),
+            ("Income:Salary", Inventory()),
+            ("Expenses:Food", "80 USD"),
+            ("Assets:Cash", Inventory()),
+        ]
+        #expect(result.rows == expected.map { [.string($0.0), .inventory($0.1)] })
+    }
+
+    /// Rows rejected by `WHERE` never touch the accumulator, so a filtered
+    /// query yields the running total of the filtered rows. `bean-query`:
+    /// `Assets:Cash 1000 → 1000 USD`, `Assets:Cash -80 → 920 USD`.
+    @Test func runBalanceColumnAccumulatesOnlyOverRowsPassingTheFilter() throws {
         let context = BeancountQueryContextBuilder.makeContext(from: try BeancountTestFixtures.sampleLedger())
         let result = try engine.run(
-            "SELECT account, balance FROM postings ORDER BY date, account",
+            "SELECT number, balance FROM postings WHERE account = 'Assets:Cash'",
             in: context
         )
 
-        let inventories = result.rows.map { row -> (String, Inventory) in
-            guard case .string(let account) = row[0],
-                  case .inventory(let balance) = row[1]
-            else {
-                Issue.record("expected (account, inventory) tuple in row \(row)")
-                return ("", Inventory())
-            }
-            return (account, balance)
-        }
+        let expected: [(Decimal, Inventory)] = [(1000, "1000 USD"), (-80, "920 USD")]
+        #expect(result.rows == expected.map { [.decimal($0.0), .inventory($0.1)] })
+    }
 
-        let cashSnapshots = inventories.filter { $0.0 == "Assets:Cash" }.map(\.1)
-        let salarySnapshots = inventories.filter { $0.0 == "Income:Salary" }.map(\.1)
-        let foodSnapshots = inventories.filter { $0.0 == "Expenses:Food" }.map(\.1)
+    /// Reading `balance` twice for the same row must not advance the running
+    /// inventory twice; `bean-query` prints identical values in both columns.
+    @Test func runBalanceColumnSelectedTwiceDoesNotDoubleCount() throws {
+        let context = BeancountQueryContextBuilder.makeContext(from: try BeancountTestFixtures.sampleLedger())
+        let result = try engine.run("SELECT balance, balance FROM postings", in: context)
 
-        let expectedCash: [Inventory] = ["1000 USD", "920 USD"]
-        let expectedSalary: [Inventory] = ["-1000 USD"]
-        let expectedFood: [Inventory] = ["80 USD"]
+        let expected: [Inventory] = ["1000 USD", Inventory(), "80 USD", Inventory()]
+        #expect(result.rows == expected.map { [.inventory($0), .inventory($0)] })
+    }
 
-        #expect(cashSnapshots == expectedCash)
-        #expect(salarySnapshots == expectedSalary)
-        #expect(foodSnapshots == expectedFood)
+    /// Qualifiers rebuild the directive list before the scan, so the running
+    /// inventory also covers the synthetic transfer postings. `bean-query`:
+    ///
+    /// ```
+    ///         account          numbe   balance
+    /// -----------------------  -----  ---------
+    /// Assets:Cash               1000   1000 USD
+    /// Income:Salary            -1000
+    /// Expenses:Food               80     80 USD
+    /// Assets:Cash                -80
+    /// Expenses:Food              -80    -80 USD
+    /// Equity:Earnings:Current     80
+    /// Income:Salary             1000   1000 USD
+    /// Equity:Earnings:Current  -1000
+    /// ```
+    @Test func runBalanceColumnCoversSummarizedPostingsUnderQualifiers() throws {
+        let context = BeancountQueryContextBuilder.makeContext(from: try BeancountTestFixtures.sampleLedger())
+        let result = try engine.run("SELECT account, balance FROM CLEAR", in: context)
+
+        let expected: [(String, Inventory)] = [
+            ("Assets:Cash", "1000 USD"),
+            ("Income:Salary", Inventory()),
+            ("Expenses:Food", "80 USD"),
+            ("Assets:Cash", Inventory()),
+            ("Expenses:Food", "-80 USD"),
+            ("Equity:Earnings:Current", Inventory()),
+            ("Income:Salary", "1000 USD"),
+            ("Equity:Earnings:Current", Inventory()),
+        ]
+        #expect(result.rows == expected.map { [.string($0.0), .inventory($0.1)] })
+    }
+
+    /// The accumulator lives on the iterator, not on the table provider, so a
+    /// second run of the same query starts from an empty inventory again.
+    @Test func runBalanceColumnRestartsOnEveryQueryRun() throws {
+        let context = BeancountQueryContextBuilder.makeContext(from: try BeancountTestFixtures.sampleLedger())
+        let query = "SELECT account, balance FROM postings"
+
+        let first = try engine.run(query, in: context)
+        let second = try engine.run(query, in: context)
+
+        #expect(first.rows == second.rows)
+        #expect(first.rows.first == [.string("Assets:Cash"), .inventory("1000 USD")])
     }
 
     @Test func runCostLabelDefaultsToEmptyStringWhenCostIsMissing() throws {
@@ -275,30 +339,98 @@ struct BeancountSourceAdapterTests {
         #expect(entries.rows == [[.int(6)]])
     }
 
-    @Test func runSelectAsteriskIncludesLazyBalanceColumn() throws {
+    /// `id` is a string derived from the directive's contents, so every posting
+    /// of a transaction reports its parent's id and distinct transactions get
+    /// distinct ids. Beancount does the same with an md5 of the directive.
+    @Test func runIDIsAPerDirectiveString() throws {
+        let context = BeancountQueryContextBuilder.makeContext(from: try BeancountTestFixtures.sampleLedger())
+        let result = try engine.run("SELECT id, narration FROM postings", in: context)
+
+        let ids = result.rows.map { row -> String in
+            guard case .string(let id) = row[0] else {
+                Issue.record("expected a string id, got \(row[0])")
+                return ""
+            }
+            return id
+        }
+
+        #expect(ids.count == 4)
+        #expect(ids[0] == ids[1])  // both postings of the salary transaction
+        #expect(ids[2] == ids[3])  // both postings of the groceries transaction
+        #expect(ids[0] != ids[2])
+        #expect(ids.allSatisfy { !$0.isEmpty })
+    }
+
+    /// The id has to identify the directive, not its position in the scan:
+    /// qualifiers rebuild the directive list (`OPEN` prepends summarization
+    /// entries), and a transaction that survives that must keep its id.
+    @Test func runIDIsStableAcrossQualifiersAndRuns() throws {
+        let context = BeancountQueryContextBuilder.makeContext(from: try BeancountTestFixtures.sampleLedger())
+
+        func groceriesID(_ query: String) throws -> String {
+            let result = try engine.run(query, in: context)
+            for row in result.rows where row[1] == .string("Groceries") {
+                guard case .string(let id) = row[0] else { break }
+                return id
+            }
+            Issue.record("no groceries row in: \(query)")
+            return ""
+        }
+
+        let plain = try groceriesID("SELECT id, narration FROM postings")
+        let rerun = try groceriesID("SELECT id, narration FROM postings")
+        let opened = try groceriesID("SELECT id, narration FROM OPEN ON 2024-01-11")
+        let cleared = try groceriesID("SELECT id, narration FROM CLEAR")
+        let fromEntries = try groceriesID("SELECT id, narration FROM entries")
+
+        #expect(!plain.isEmpty)
+        #expect(rerun == plain)
+        #expect(opened == plain)
+        #expect(cleared == plain)
+        #expect(fromEntries == plain)
+    }
+
+    /// `SELECT *` on `postings` expands to beancount's five wildcard columns,
+    /// in beancount's order — not to every column the table can serve.
+    /// `PostingsTable.wildcard_columns = 'date flag payee narration position'`.
+    @Test func runSelectAsteriskMatchesUpstreamPostingsWildcard() throws {
+        let context = BeancountQueryContextBuilder.makeContext(from: try BeancountTestFixtures.sampleLotLedger())
+        let result = try engine.run("SELECT * FROM postings", in: context)
+
+        #expect(result.columns == ["date", "flag", "payee", "narration", "position"])
+    }
+
+    /// `SELECT *` on `entries` expands to all of the table's columns in
+    /// declaration order, which is what beancount does for that table.
+    @Test func runSelectAsteriskMatchesUpstreamEntriesWildcard() throws {
+        let context = BeancountQueryContextBuilder.makeContext(from: try BeancountTestFixtures.sampleLedger())
+        let result = try engine.run("SELECT * FROM entries", in: context)
+
+        #expect(result.columns == [
+            "id", "type", "filename", "lineno", "date", "year", "month", "day",
+            "flag", "payee", "narration", "description", "tags", "links", "meta", "accounts",
+        ])
+    }
+
+    /// Columns outside the wildcard set stay queryable by name; `balance` in
+    /// particular still tracks the rows the query selects.
+    @Test func runNonWildcardColumnsRemainSelectableByName() throws {
         let context = BeancountQueryContextBuilder.makeContext(from: try BeancountTestFixtures.sampleLotLedger())
         let result = try engine.run(
-            "SELECT * FROM postings WHERE account = 'Assets:Brokerage' ORDER BY date",
+            """
+            SELECT balance, tags, links, other_accounts FROM postings \
+            WHERE account = 'Assets:Brokerage' ORDER BY date
+            """,
             in: context
         )
 
-        guard let balanceIndex = result.columns.firstIndex(of: "balance") else {
-            Issue.record("expected wildcard columns to contain balance")
-            return
-        }
-        guard let tagsIndex = result.columns.firstIndex(of: "tags"),
-              let linksIndex = result.columns.firstIndex(of: "links"),
-              let otherAccountsIndex = result.columns.firstIndex(of: "other_accounts")
-        else {
-            Issue.record("expected wildcard columns to contain tags, links and other_accounts")
-            return
-        }
-
+        #expect(result.columns == ["balance", "tags", "links", "other_accounts"])
         #expect(result.rows.count == 2)
-        guard case .inventory(let firstBalance) = result.rows[0][balanceIndex],
-              case .inventory(let secondBalance) = result.rows[1][balanceIndex]
+
+        guard case .inventory(let firstBalance) = result.rows[0][0],
+              case .inventory(let secondBalance) = result.rows[1][0]
         else {
-            Issue.record("expected running lot inventory in wildcard balance column")
+            Issue.record("expected running lot inventory in balance column")
             return
         }
 
@@ -306,9 +438,9 @@ struct BeancountSourceAdapterTests {
         let expectedSecond: Inventory = "10 VTI {100 USD, 2024-01-15}, 5 VTI {110 USD, 2024-02-10}"
         #expect(firstBalance == expectedFirst)
         #expect(secondBalance == expectedSecond)
-        #expect(result.rows[0][tagsIndex] == .list([]))
-        #expect(result.rows[0][linksIndex] == .list([]))
-        #expect(result.rows[0][otherAccountsIndex] == .list([.string("Assets:Cash")]))
+        #expect(result.rows[0][1] == .list([]))
+        #expect(result.rows[0][2] == .list([]))
+        #expect(result.rows[0][3] == .list([.string("Assets:Cash")]))
     }
 
     @Test func runQueryAgainstTransactionsTable() throws {
@@ -424,22 +556,28 @@ struct BeancountSourceAdapterTests {
         let context = BeancountQueryContextBuilder.makeContext(from: try BeancountTestFixtures.directiveTablesLedger())
 
         let prices = try engine.run("SELECT * FROM prices", in: context)
-        #expect(prices.columns == ["amount", "currency", "date"])
+        #expect(prices.columns == ["date", "currency", "amount"])
 
         let balances = try engine.run("SELECT * FROM balances", in: context)
-        #expect(balances.columns == ["account", "amount", "date", "discrepancy", "tolerance"])
+        #expect(balances.columns == ["date", "account", "amount", "tolerance", "discrepancy"])
 
         let notes = try engine.run("SELECT * FROM notes", in: context)
-        #expect(notes.columns == ["account", "comment", "date", "links", "tags"])
+        #expect(notes.columns == ["date", "account", "comment", "tags", "links"])
 
         let events = try engine.run("SELECT * FROM events", in: context)
-        #expect(events.columns == ["date", "description", "type"])
+        #expect(events.columns == ["date", "type", "description"])
 
         let custom = try engine.run("SELECT * FROM custom", in: context)
         #expect(custom.columns == ["date", "type", "values"])
 
         let transactions = try engine.run("SELECT * FROM transactions", in: context)
-        #expect(transactions.columns == ["accounts", "date", "flag", "links", "narration", "payee", "tags"])
+        #expect(transactions.columns == ["date", "flag", "payee", "narration", "tags", "links", "accounts"])
+
+        let accounts = try engine.run("SELECT * FROM accounts", in: context)
+        #expect(accounts.columns == ["account", "open", "close"])
+
+        let commodities = try engine.run("SELECT * FROM commodities", in: context)
+        #expect(commodities.columns == ["meta", "date", "name"])
     }
 
     @Test func runBudgetSearchQueriesLikeBeanQuery() throws {
