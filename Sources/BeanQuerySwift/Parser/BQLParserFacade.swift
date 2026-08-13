@@ -1,4 +1,5 @@
 import Foundation
+import Synchronization
 import Antlr4
 
 struct BQLSyntaxError: Error, Equatable, Sendable {
@@ -61,12 +62,17 @@ private final class CollectingErrorListener: BaseErrorListener {
 }
 
 enum BQLParserFacade {
-    private static let parseLock = NSLock()
+    /// ANTLR's generated lexer/parser keep mutable global state, so parses are
+    /// serialized.
+    private static let parseLock = Mutex(())
 
     static func parse(_ input: String) throws -> BQLParser.BqlContext {
-        parseLock.lock()
-        defer { parseLock.unlock() }
+        try parseLock.withLock { _ in
+            try parseUnlocked(input)
+        }
+    }
 
+    private static func parseUnlocked(_ input: String) throws -> BQLParser.BqlContext {
         let inputStream = ANTLRInputStream(input)
         let lexer = BQLLexer(inputStream)
         lexer.setTokenFactory(CommonTokenFactory(true))
