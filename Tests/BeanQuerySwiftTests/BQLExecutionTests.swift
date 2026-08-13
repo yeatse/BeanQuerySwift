@@ -161,6 +161,47 @@ struct BQLExecutionTests {
         #expect(result.rows == [[.string("Expenses:Food"), .int(previousYear)]])
     }
 
+    @Test func runAnyAllQuantifiersWithTwoCharacterOperators() throws {
+        let quantifierContext = QueryContext(tables: [
+            "postings": [
+                [
+                    "account": .string("Assets:Cash"),
+                    "number": .int(5),
+                    "numbers": .list([.int(5), .int(7)]),
+                ],
+                [
+                    "account": .string("Assets:Bank"),
+                    "number": .int(9),
+                    "numbers": .list([.int(5), .int(7)]),
+                ],
+            ],
+        ])
+
+        let anyResult = try engine.run(
+            "SELECT account WHERE number <= ANY(numbers)",
+            in: quantifierContext
+        )
+        #expect(anyResult.rows == [[.string("Assets:Cash")]])
+
+        let allResult = try engine.run(
+            "SELECT account WHERE number >= ALL(numbers)",
+            in: quantifierContext
+        )
+        #expect(allResult.rows == [[.string("Assets:Bank")]])
+
+        let strictAny = try engine.run(
+            "SELECT account WHERE number < ANY(numbers)",
+            in: quantifierContext
+        )
+        #expect(strictAny.rows == [[.string("Assets:Cash")]])
+
+        let strictAll = try engine.run(
+            "SELECT account WHERE number > ALL(numbers)",
+            in: quantifierContext
+        )
+        #expect(strictAll.rows == [[.string("Assets:Bank")]])
+    }
+
     @Test func runSelectGroupByAggregate() throws {
         let result = try engine.run(
             "SELECT account, sum(number) AS total FROM #postings WHERE year = 2024 GROUP BY account ORDER BY total DESC",

@@ -74,6 +74,21 @@ enum BeancountTestFixtures {
         return try Loader.load(file: "test-account-functions.bean", contentProvider: provider)
     }
 
+    static func repeatedAccountsLedger() throws -> ParsedLedger<Cost> {
+        let provider = StringContentProvider(source: """
+        option "operating_currency" "USD"
+
+        2024-01-01 open Assets:Cash USD
+        2024-01-01 open Expenses:Food USD
+
+        2024-01-10 * "Store" "Split payment"
+          Expenses:Food       30 USD
+          Expenses:Food       20 USD
+          Assets:Cash        -50 USD
+        """)
+        return try Loader.load(file: "test-repeated-accounts.bean", contentProvider: provider)
+    }
+
     static func directiveTablesLedger() throws -> ParsedLedger<Cost> {
         let provider = StringContentProvider(source: """
         option "operating_currency" "USD"

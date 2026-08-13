@@ -215,6 +215,21 @@ struct BeancountSourceAdapterTests {
         ]])
     }
 
+    @Test func runOtherAccountsIsASetOfAccounts() throws {
+        let context = BeancountQueryContextBuilder.makeContext(from: try BeancountTestFixtures.repeatedAccountsLedger())
+        let result = try engine.run(
+            "SELECT account, other_accounts FROM postings ORDER BY account, number",
+            in: context
+        )
+
+        #expect(result.columns == ["account", "other_accounts"])
+        #expect(result.rows == [
+            [.string("Assets:Cash"), .list([.string("Expenses:Food")])],
+            [.string("Expenses:Food"), .list([.string("Assets:Cash"), .string("Expenses:Food")])],
+            [.string("Expenses:Food"), .list([.string("Assets:Cash"), .string("Expenses:Food")])],
+        ])
+    }
+
     @Test func runEntryFieldsExposeTagsAndLinksForFiltering() throws {
         let context = BeancountQueryContextBuilder.makeContext(from: try BeancountTestFixtures.sampleLedger())
 
