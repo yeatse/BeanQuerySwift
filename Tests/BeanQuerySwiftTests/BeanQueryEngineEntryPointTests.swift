@@ -70,6 +70,6 @@ struct BeanQueryEngineEntryPointTests {
 
         let rendered = try engine.run("PRINT", in: ledger).render(as: .beancount)
 
-        #expect(rendered == ledger.directives.map(\.description).joined())
+        #expect(rendered == ledger.directives.map { $0.description }.joined())
     }
 }

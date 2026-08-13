@@ -14,7 +14,7 @@ let package = Package(
         ),
     ],
     dependencies: [
-        .package(url: "https://github.com/yeatse/BeancountSwift", from: "1.1.2"),
+        .package(url: "https://github.com/yeatse/BeancountSwift", from: "1.1.4"),
         .package(url: "https://github.com/antlr/antlr4", from: "4.13.2"),
     ],
     targets: [
