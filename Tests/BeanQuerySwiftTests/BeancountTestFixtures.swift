@@ -101,6 +101,11 @@ enum BeancountTestFixtures {
         2024-01-21 note Assets:Cash "Reconciled with statement"
 
         2024-01-22 event "location" "Tokyo"
+
+        2024-01-23 custom "budget" "Expenses:Food" "monthly" 500.00 USD
+          source: "planner"
+
+        2024-01-24 custom "fiscal-year-end" 2024-12-31
         """)
         return try Loader.load(file: "test-directive-tables.bean", contentProvider: provider)
     }

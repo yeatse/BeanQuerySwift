@@ -7,6 +7,12 @@ import BeancountSwift
 struct BeancountSourceAdapterTests {
     private let engine = BeanQueryEngine()
 
+    private func date(_ year: Int, _ month: Int, _ day: Int) -> Date {
+        Calendar(identifier: .gregorian).date(
+            from: DateComponents(year: year, month: month, day: day)
+        )!
+    }
+
     @Test func runQueryAgainstBeancountDirectives() throws {
         let context = BeancountQueryContextBuilder.makeContext(from: try BeancountTestFixtures.sampleLedger())
 
@@ -362,6 +368,43 @@ struct BeancountSourceAdapterTests {
         #expect(result.rows[0][2] == .string("Tokyo"))
     }
 
+    @Test func runQueryAgainstCustomTable() throws {
+        let context = BeancountQueryContextBuilder.makeContext(from: try BeancountTestFixtures.directiveTablesLedger())
+        let result = try engine.run(
+            "SELECT date, type, values FROM custom ORDER BY date",
+            in: context
+        )
+
+        #expect(result.columns == ["date", "type", "values"])
+        #expect(result.rows.count == 2)
+        #expect(result.rows[0][1] == .string("budget"))
+        #expect(result.rows[0][2] == .list([
+            .string("Expenses:Food"),
+            .string("monthly"),
+            .amount(Amount(number: 500, currency: Currency(id: "USD"))),
+        ]))
+        #expect(result.rows[1][1] == .string("fiscal-year-end"))
+        #expect(result.rows[1][2] == .list([.date(date(2024, 12, 31))]))
+    }
+
+    @Test func runQueryAgainstCustomTableFiltersAndExposesMeta() throws {
+        let context = BeancountQueryContextBuilder.makeContext(from: try BeancountTestFixtures.directiveTablesLedger())
+
+        let filtered = try engine.run(
+            "SELECT date FROM custom WHERE type = 'budget'",
+            in: context
+        )
+        #expect(filtered.rows.count == 1)
+
+        let meta = try engine.run("SELECT meta FROM custom WHERE type = 'budget'", in: context)
+        #expect(meta.columns == ["meta"])
+        guard case .dict(let values)? = meta.rows.first?.first else {
+            Issue.record("expected meta dictionary")
+            return
+        }
+        #expect(values["source"] == .string("planner"))
+    }
+
     @Test func runWildcardSelectsExposeNewDirectiveColumns() throws {
         let context = BeancountQueryContextBuilder.makeContext(from: try BeancountTestFixtures.directiveTablesLedger())
 
@@ -376,6 +419,9 @@ struct BeancountSourceAdapterTests {
 
         let events = try engine.run("SELECT * FROM events", in: context)
         #expect(events.columns == ["date", "description", "type"])
+
+        let custom = try engine.run("SELECT * FROM custom", in: context)
+        #expect(custom.columns == ["date", "type", "values"])
 
         let transactions = try engine.run("SELECT * FROM transactions", in: context)
         #expect(transactions.columns == ["accounts", "date", "flag", "links", "narration", "payee", "tags"])

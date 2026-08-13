@@ -129,6 +129,7 @@ indirect enum QueryRowStorage: Sendable {
     case beancountNote(BeancountNoteQueryRow)
     case beancountEvent(BeancountEventQueryRow)
     case beancountDocument(BeancountDocumentQueryRow)
+    case beancountCustom(BeancountCustomQueryRow)
 
     func value(for column: String) -> RuntimeValue? {
         switch self {
@@ -153,6 +154,8 @@ indirect enum QueryRowStorage: Sendable {
         case .beancountEvent(let row):
             return row.value(for: column)
         case .beancountDocument(let row):
+            return row.value(for: column)
+        case .beancountCustom(let row):
             return row.value(for: column)
         }
     }
@@ -181,6 +184,8 @@ indirect enum QueryRowStorage: Sendable {
             return BeancountEventQueryRow.wildcardColumns
         case .beancountDocument:
             return BeancountDocumentQueryRow.wildcardColumns
+        case .beancountCustom:
+            return BeancountCustomQueryRow.wildcardColumns
         }
     }
 }

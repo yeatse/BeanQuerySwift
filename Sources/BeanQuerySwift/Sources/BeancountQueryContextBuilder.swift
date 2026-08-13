@@ -44,6 +44,7 @@ public enum BeancountQueryContextBuilder {
                 "notes": BeancountNotesTableProvider(directives: sortedDirectives),
                 "events": BeancountEventsTableProvider(directives: sortedDirectives),
                 "documents": BeancountDocumentsTableProvider(directives: sortedDirectives),
+                "custom": BeancountCustomTableProvider(directives: sortedDirectives),
                 "accounts": BeancountAccountsTableProvider(staticRows: staticRows),
                 "commodities": BeancountCommoditiesTableProvider(staticRows: staticRows),
             ],
@@ -316,6 +317,29 @@ public enum BeancountQueryContextBuilder {
                         BeancountEventQueryRow(
                             date: directive.date,
                             event: event,
+                            meta: .dict(runtimeMetaDictionary(from: directive.meta))
+                        )
+                    ))
+                }
+                return nil
+            }
+        })
+    }
+
+    fileprivate static func customRowSequence(directives: [Directive<Cost>]) -> QueryRowSequence {
+        QueryRowSequence(makeIterator: {
+            var index = 0
+            return AnyIterator {
+                while index < directives.count {
+                    let directive = directives[index]
+                    index += 1
+                    guard case .custom(let custom) = directive.content else {
+                        continue
+                    }
+                    return QueryRow(storage: .beancountCustom(
+                        BeancountCustomQueryRow(
+                            date: directive.date,
+                            custom: custom,
                             meta: .dict(runtimeMetaDictionary(from: directive.meta))
                         )
                     ))
@@ -964,6 +988,44 @@ struct BeancountDocumentQueryRow: Sendable {
 
     func value(for column: String) -> RuntimeValue? {
         Self.accessors[column].map { $0(self) }
+    }
+}
+
+struct BeancountCustomQueryRow: Sendable {
+    let date: Date
+    let custom: Custom
+    let meta: RuntimeValue
+
+    static let wildcardColumns = [
+        "date",
+        "type",
+        "values",
+    ]
+
+    private static let accessors: [String: @Sendable (BeancountCustomQueryRow) -> RuntimeValue] = [
+        "date": { .date($0.date) },
+        "meta": { $0.meta },
+        "type": { .string($0.custom.type) },
+        "values": { row in
+            .list(row.custom.values.map(BeancountQueryContextBuilder.runtimeMetaValue))
+        },
+    ]
+
+    func value(for column: String) -> RuntimeValue? {
+        Self.accessors[column].map { $0(self) }
+    }
+}
+
+private struct BeancountCustomTableProvider: QueryTableProvider {
+    var directives: [Directive<Cost>]
+
+    func rows(for qualifiers: EvalQualifiers?) throws -> QueryRowSequence {
+        try requireNoQualifiers(qualifiers, table: "custom")
+        return BeancountQueryContextBuilder.customRowSequence(directives: directives)
+    }
+
+    func wildcardColumns(for qualifiers: EvalQualifiers?) throws -> [String] {
+        BeancountCustomQueryRow.wildcardColumns
     }
 }
 
