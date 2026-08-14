@@ -574,6 +574,10 @@ struct BeancountPostingQueryRow: Sendable {
         "position",
     ]
 
+    /// `balance` advances a running inventory as rows reach it, so its value
+    /// only means anything when read in scan order.
+    static let scanOrderColumns = ["balance"]
+
     private static let accessors: [String: @Sendable (BeancountPostingQueryRow) -> RuntimeValue] = [
         "account": { .string($0.posting.account.id) },
         "accounts": { .list($0.transaction.postings.map { .string($0.account.id) }) },

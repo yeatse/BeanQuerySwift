@@ -94,6 +94,26 @@ public struct QueryRow: ExpressibleByDictionaryLiteral, Sendable {
         }
         return QueryRow(storage: .overlay(base: self, overrides: overrides))
     }
+
+    /// Materialize the scan-order dependent columns the query reads, pinning
+    /// them to the value they hold at this point of the scan.
+    ///
+    /// Columns like `balance` accumulate as rows reach them, so reading one
+    /// later — or twice — no longer yields the scan-order value. Callers that
+    /// buffer rows before evaluating them freeze those columns here first.
+    func freezingScanOrderColumns(readBy readColumns: Set<String>) -> QueryRow {
+        let columns = storage.scanOrderColumns.filter(readColumns.contains)
+        guard !columns.isEmpty else {
+            return self
+        }
+
+        var overrides: [String: RuntimeValue] = [:]
+        overrides.reserveCapacity(columns.count)
+        for column in columns {
+            overrides[column] = storage.value(for: column) ?? .null
+        }
+        return overlaying(overrides)
+    }
 }
 
 struct QueryRowSequence: Sequence {
@@ -186,6 +206,18 @@ indirect enum QueryRowStorage: Sendable {
             return BeancountDocumentQueryRow.wildcardColumns
         case .beancountCustom:
             return BeancountCustomQueryRow.wildcardColumns
+        }
+    }
+
+    /// Columns whose value depends on how far the scan has advanced.
+    var scanOrderColumns: [String] {
+        switch self {
+        case .beancountPosting:
+            return BeancountPostingQueryRow.scanOrderColumns
+        case .overlay(let base, _):
+            return base.storage.scanOrderColumns
+        default:
+            return []
         }
     }
 }

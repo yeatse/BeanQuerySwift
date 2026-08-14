@@ -203,6 +203,79 @@ struct BeancountSourceAdapterTests {
         #expect(result.rows == expected.map { [.inventory($0), .inventory($0)] })
     }
 
+    /// Grouping buffers rows before evaluating them, but `balance` must still
+    /// accumulate in source scan order — beanquery updates its aggregates in a
+    /// single pass over the scan. `bean-query`:
+    ///
+    /// ```
+    ///    account     last(ba
+    /// -------------  -------
+    /// Assets:Cash
+    /// Income:Salary
+    /// Expenses:Food   80 USD
+    /// ```
+    @Test func runGroupedBalanceAccumulatesInScanOrder() throws {
+        let context = BeancountQueryContextBuilder.makeContext(from: try BeancountTestFixtures.sampleLedger())
+        let query = "SELECT account, last(balance) FROM postings GROUP BY account"
+
+        let expected: [(String, Inventory)] = [
+            ("Assets:Cash", Inventory()),
+            ("Income:Salary", Inventory()),
+            ("Expenses:Food", "80 USD"),
+        ]
+        let expectedRows = expected.map { [RuntimeValue.string($0.0), .inventory($0.1)] }
+
+        // Groups used to come out of a Swift Dictionary, so both the values and
+        // their order changed from run to run.
+        for _ in 0..<3 {
+            #expect(try engine.run(query, in: context).rows == expectedRows)
+        }
+    }
+
+    /// Every aggregate over a group re-reads the group's rows; that must not
+    /// advance the running inventory again. `bean-query`:
+    ///
+    /// ```
+    ///    account     first(bal  last(ba
+    /// -------------  ---------  -------
+    /// Assets:Cash     1000 USD
+    /// Income:Salary
+    /// Expenses:Food     80 USD   80 USD
+    /// ```
+    @Test func runRepeatedGroupedBalanceAggregatesDoNotDoubleCount() throws {
+        let context = BeancountQueryContextBuilder.makeContext(from: try BeancountTestFixtures.sampleLedger())
+        let result = try engine.run(
+            "SELECT account, first(balance), last(balance) FROM postings GROUP BY account",
+            in: context
+        )
+
+        let expected: [(String, Inventory, Inventory)] = [
+            ("Assets:Cash", "1000 USD", Inventory()),
+            ("Income:Salary", Inventory(), Inventory()),
+            ("Expenses:Food", "80 USD", "80 USD"),
+        ]
+        #expect(result.rows == expected.map { [.string($0.0), .inventory($0.1), .inventory($0.2)] })
+    }
+
+    /// Without `ORDER BY`, groups come out in first-appearance order, like
+    /// beanquery iterating its insertion-ordered aggregates dict. `bean-query`:
+    /// `Assets:Cash 920`, `Income:Salary -1000`, `Expenses:Food 80`.
+    @Test func runGroupedRowsKeepFirstAppearanceOrder() throws {
+        let context = BeancountQueryContextBuilder.makeContext(from: try BeancountTestFixtures.sampleLedger())
+        let query = "SELECT account, sum(number) FROM postings GROUP BY account"
+
+        let expected: [(String, Decimal)] = [
+            ("Assets:Cash", 920),
+            ("Income:Salary", -1000),
+            ("Expenses:Food", 80),
+        ]
+        let expectedRows = expected.map { [RuntimeValue.string($0.0), .decimal($0.1)] }
+
+        for _ in 0..<3 {
+            #expect(try engine.run(query, in: context).rows == expectedRows)
+        }
+    }
+
     /// Qualifiers rebuild the directive list before the scan, so the running
     /// inventory also covers the synthetic transfer postings. `bean-query`:
     ///

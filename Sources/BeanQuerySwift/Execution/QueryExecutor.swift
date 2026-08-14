@@ -173,6 +173,14 @@ struct QueryExecutor {
         }
 
         let groupIndexes = query.groupIndexes ?? []
+        // beanquery updates every aggregate in a single scan-order pass
+        // (`query_execute.execute_select`), so a column like `balance` advances
+        // exactly once per row, in the order the source produced it. We instead
+        // buffer rows into buckets and evaluate them afterwards, which would
+        // accumulate in bucket order and re-accumulate for each aggregate over
+        // the same bucket — so pin those columns while scanning.
+        let readColumns = readColumns(of: query)
+        var groupOrder: [GroupKey] = []
         var buckets: [GroupKey: [QueryRow]] = [:]
 
         for row in rows {
@@ -187,20 +195,28 @@ struct QueryExecutor {
                 }
             }
 
+            let scannedRow = row.freezingScanOrderColumns(readBy: readColumns)
             let keyValues = try groupIndexes.map { index in
                 try evaluateExpression(
                     query.targets[index].expression,
-                    row: row,
+                    row: scannedRow,
                     group: nil,
                     context: context
                 )
             }
-            buckets[GroupKey(values: keyValues), default: []].append(row)
+            let key = GroupKey(values: keyValues)
+            if buckets[key] == nil {
+                groupOrder.append(key)
+            }
+            buckets[key, default: []].append(scannedRow)
         }
 
+        // Groups come out in first-appearance order, like beanquery iterating
+        // its insertion-ordered `aggregates` dict; a Swift Dictionary would
+        // hand back a different order on every run.
         var output: [[RuntimeValue]] = []
-        for (_, groupRows) in buckets {
-            guard let first = groupRows.first else { continue }
+        for key in groupOrder {
+            guard let groupRows = buckets[key], let first = groupRows.first else { continue }
 
             let values = try query.targets.map { target in
                 try evaluateExpression(
@@ -221,6 +237,45 @@ struct QueryExecutor {
         }
 
         return applyOrdering(output, orderSpec: query.orderSpec)
+    }
+
+    /// Source columns the query reads, lowercased as the row storages key them.
+    private func readColumns(of query: EvalQuery) -> Set<String> {
+        var columns: Set<String> = []
+        for target in query.targets {
+            collectColumns(target.expression, into: &columns)
+        }
+        if let filter = query.filter {
+            collectColumns(filter, into: &columns)
+        }
+        return columns
+    }
+
+    private func collectColumns(_ expression: BQLExpression, into columns: inout Set<String>) {
+        switch expression {
+        case .column(let name):
+            columns.insert(name.lowercased())
+
+        case .function(_, let args), .and(let args), .or(let args):
+            for arg in args {
+                collectColumns(arg, into: &columns)
+            }
+
+        case .unary(_, let operand), .attribute(let operand, _), .subscriptExpr(let operand, _):
+            collectColumns(operand, into: &columns)
+
+        case .binary(_, let left, let right), .anyAll(_, _, let left, let right):
+            collectColumns(left, into: &columns)
+            collectColumns(right, into: &columns)
+
+        case .between(let value, let lower, let upper):
+            collectColumns(value, into: &columns)
+            collectColumns(lower, into: &columns)
+            collectColumns(upper, into: &columns)
+
+        case .constant, .placeholder, .select, .asterisk:
+            break
+        }
     }
 
     private func evaluateVisibleRows(
