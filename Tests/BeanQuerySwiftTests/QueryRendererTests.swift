@@ -115,7 +115,7 @@ struct QueryRendererTests {
         let result = try engine.run("PRINT", in: context)
 
         let rendered = try QueryRenderer.render(result, format: .beancount)
-        let expected = try BeancountTestFixtures.sampleLedger().directives.map(\.description).joined()
+        let expected = try BeancountTestFixtures.sampleLedger().directives.map { $0.description }.joined()
 
         #expect(rendered == expected)
     }
