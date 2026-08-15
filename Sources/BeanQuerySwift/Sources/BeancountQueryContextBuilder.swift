@@ -436,10 +436,20 @@ public enum BeancountQueryContextBuilder {
         return .string(parts.joined(separator: " | "))
     }
 
-    fileprivate static func runtimeMetaDictionary(from metadata: MetaData) -> [String: RuntimeValue] {
+    /// Directives store their position as a `range` entry rather than a `lineno`
+    /// one, so the line number is added explicitly here. Python beanquery always
+    /// exposes `lineno` in the metadata dictionary, and `meta['lineno']` has to
+    /// agree with the dedicated `lineno` column.
+    static func runtimeMetaDictionary(
+        from metadata: MetaData,
+        lineNumber: Int? = nil
+    ) -> [String: RuntimeValue] {
         var result: [String: RuntimeValue] = [:]
         for (key, value) in metadata {
             result[key] = runtimeMetaValue(value)
+        }
+        if let lineNumber = lineNumber ?? metadata.lineno {
+            result["lineno"] = .int(lineNumber)
         }
         return result
     }
@@ -608,15 +618,24 @@ struct BeancountPostingQueryRow: Sendable {
         "flag": { $0.transaction.flag.map { .string(String($0)) } ?? .null },
         "id": { .string($0.ids.id(index: $0.directiveIndex, of: $0.directive)) },
         "lineno": { row in
-            (row.posting.meta?.lineno ?? row.directive.meta.lineno).map { .int(Int($0)) } ?? .null
+            postingLineNumber(row).map { .int($0) } ?? .null
         },
         "links": { runtimeStringListValue($0.transaction.links.map(\.id)) },
         "location": { row in
-            let meta = row.posting.meta ?? row.directive.meta
-            guard let filename = meta.filename, let lineno = meta.lineno else { return .null }
+            let filename = row.posting.meta?.filename ?? row.directive.meta.filename
+            guard let filename, let lineno = postingLineNumber(row) else { return .null }
             return .string("\(filename):\(lineno):")
         },
-        "meta": { $0.posting.meta.map { .dict(BeancountQueryContextBuilder.runtimeMetaDictionary(from: $0)) } ?? .null },
+        "meta": { row in
+            row.posting.meta.map { meta in
+                .dict(
+                    BeancountQueryContextBuilder.runtimeMetaDictionary(
+                        from: meta,
+                        lineNumber: postingLineNumber(row)
+                    )
+                )
+            } ?? .null
+        },
         "month": { .int($0.month) },
         "narration": { $0.transaction.narration.map(RuntimeValue.string) ?? .null },
         "number": { .decimal($0.posting.units.number) },
@@ -677,7 +696,7 @@ struct BeancountEntryQueryRow: Sendable {
         "filename": { $0.directive.meta.filename.map(RuntimeValue.string) ?? .null },
         "flag": { flagValue(for: $0.directive) },
         "id": { .string($0.ids.id(index: $0.directiveIndex, of: $0.directive)) },
-        "lineno": { $0.directive.meta.lineno.map { .int(Int($0)) } ?? .null },
+        "lineno": { $0.directive.meta.lineno.map { .int($0) } ?? .null },
         "links": { linksValue(for: $0.directive) },
         "meta": { .dict(BeancountQueryContextBuilder.runtimeMetaDictionary(from: $0.directive.meta)) },
         "month": { .int($0.month) },
@@ -715,6 +734,12 @@ struct BeancountAccountQueryRow: Sendable {
     func value(for column: String) -> RuntimeValue? {
         Self.accessors[column].map { $0(self) }
     }
+}
+
+/// Postings carry their own source position when they come from a parsed ledger;
+/// otherwise the parent directive position is used, like Python's postings table.
+private func postingLineNumber(_ row: BeancountPostingQueryRow) -> Int? {
+    row.posting.meta?.lineno ?? row.directive.meta.lineno
 }
 
 private func flagValue(for directive: Directive<Cost>) -> RuntimeValue {

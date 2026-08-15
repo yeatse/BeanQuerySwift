@@ -593,8 +593,9 @@ struct QueryExecutor {
             let value = try evaluateExpression(operandExpr, row: row, aggregates: aggregates, context: context)
             return try resolveAttribute(value, name: name)
 
-        case .subscriptExpr:
-            throw BQLExecutionError.unsupportedExpression("subscript")
+        case .subscriptExpr(let operandExpr, let key):
+            let value = try evaluateExpression(operandExpr, row: row, aggregates: aggregates, context: context)
+            return try resolveSubscript(value, key: key)
 
         case .select:
             throw BQLExecutionError.unsupportedExpression("subquery expression")
@@ -1092,6 +1093,20 @@ private func resolveAttribute(_ value: RuntimeValue, name: String) throws -> Run
     }
 }
 
+/// Mirrors beanquery's `Subscript` compilation, which only accepts dict-typed
+/// operands and otherwise reports "column type is not subscriptable"
+/// (compiler.py). A missing key yields null, like the `getitem` builtin.
+private func resolveSubscript(_ value: RuntimeValue, key: String) throws -> RuntimeValue {
+    switch value {
+    case .null:
+        return .null
+    case .dict(let map):
+        return map[key] ?? .null
+    default:
+        throw BQLExecutionError.invalidType
+    }
+}
+
 private func costStructure(_ cost: Cost) -> RuntimeValue {
     .structure(name: "Cost", fields: [
         "number": .decimal(cost.number),
@@ -1106,11 +1121,9 @@ private func directiveAttribute(_ directive: Directive<Cost>, name: String) -> R
     case "date":
         return .date(directive.date)
     case "meta":
-        var fields: [String: RuntimeValue] = [:]
-        for (key, value) in directive.meta {
-            fields[key] = directiveMetaValue(value)
-        }
-        return .dict(fields)
+        // Python compiles `entry_meta(key)` down to `entry.meta[key]`, so both
+        // must expose the same dictionary, including the derived line number.
+        return .dict(BeancountQueryContextBuilder.runtimeMetaDictionary(from: directive.meta))
     case "type":
         return .string(directiveTypeName(directive.content))
     default:
@@ -1200,20 +1213,6 @@ private func directiveTypeName(_ content: DirectiveContent<Cost>) -> String {
     case .price: return "price"
     case .document: return "document"
     case .custom: return "custom"
-    }
-}
-
-private func directiveMetaValue(_ value: MetaDataValue) -> RuntimeValue {
-    switch value {
-    case .string(let text): return .string(text)
-    case .account(let account): return .string(account.id)
-    case .currency(let currency): return .string(currency.id)
-    case .date(let date): return .date(date)
-    case .tag(let tag): return .string(tag.id)
-    case .number(let number): return .decimal(number)
-    case .bool(let bool): return .bool(bool)
-    case .amount(let amount): return .amount(amount)
-    case .range(let range): return .string(String(describing: range))
     }
 }
 

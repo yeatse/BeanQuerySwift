@@ -711,4 +711,50 @@ struct BeancountSourceAdapterTests {
         ])
     }
 
+    /// Directives synthesized by operations such as `Summarize` carry an explicit
+    /// line number that is already in Beancount's own numbering (`0` for
+    /// `<summarize>`, `-1` for `<conversions>`), so it must not be shifted by the
+    /// 0-based-row conversion applied to parsed directives.
+    @Test func synthesizedDirectivesKeepTheirExplicitLineNumber() throws {
+        let synthesized = [
+            Directive<Cost>(
+                meta: ["filename": .string("<summarize>"), "lineno": .number(0)],
+                date: date(2024, 1, 1),
+                content: .transaction(
+                    Transaction(
+                        flag: "*",
+                        payee: nil,
+                        narration: "Opening balance",
+                        tags: [],
+                        links: [],
+                        postings: []
+                    )
+                )
+            ),
+            Directive<Cost>(
+                meta: ["filename": .string("<conversions>"), "lineno": .number(-1)],
+                date: date(2024, 1, 2),
+                content: .transaction(
+                    Transaction(
+                        flag: "*",
+                        payee: nil,
+                        narration: "Conversion",
+                        tags: [],
+                        links: [],
+                        postings: []
+                    )
+                )
+            ),
+        ]
+
+        let result = try engine.run(
+            "SELECT filename, lineno, meta['lineno'] AS metaLine FROM entries ORDER BY date",
+            in: BeancountQueryContextBuilder.makeContext(directives: synthesized)
+        )
+
+        #expect(result.rows == [
+            [.string("<summarize>"), .int(0), .int(0)],
+            [.string("<conversions>"), .int(-1), .int(-1)],
+        ])
+    }
 }
