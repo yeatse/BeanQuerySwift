@@ -155,6 +155,17 @@ The generation script also applies Swift 6 compatibility adjustments to generate
 
 ## References
 
-- `/Users/yeatse/Developer/Repo/BeanQuerySwift/Docs/bean-query-swift-execution-plan.md`
-- `/Users/yeatse/Developer/Repo/BeanQuerySwift/Docs/bean-query.md`
-- `/Users/yeatse/Developer/Repo/BeanQuerySwift/Docs/antlr.md`
+- [`Docs/bean-query-swift-execution-plan.md`](Docs/bean-query-swift-execution-plan.md)
+- [`Docs/bean-query.md`](Docs/bean-query.md)
+- [`Docs/antlr.md`](Docs/antlr.md)
+
+## License
+
+Copyright (C) 2026 Yang Chao.
+
+This project is licensed under the terms of the GNU General Public License, version 2 only.
+See [LICENSE](LICENSE).
+
+BeanQuerySwift is a Swift port of [beanquery](https://github.com/beancount/beanquery), which is
+distributed under the GPL-2.0-only license, and builds on
+[BeancountSwift](https://github.com/yeatse/BeancountSwift) under the same license.
