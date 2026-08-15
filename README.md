@@ -3,6 +3,10 @@
 BeanQuerySwift is a Swift implementation of Beancount `bean-query`.
 It compiles BQL into `EvalQuery`, then executes against Beancount data (`ParsedLedger<Cost>`, `[Directive<Cost>]`, or a custom `QueryContext`).
 
+Used in [Cocono App - Beancount Agent for iOS](https://cocono.app)
+
+[![Download on th AppStore](https://toolbox.marketingtools.apple.com/api/v2/badges/download-on-the-app-store/black/en-us?releaseDate=1776211200)](https://apps.apple.com/app/id6497061011) [![Download on th AppStore](https://toolbox.marketingtools.apple.com/api/v2/badges/download-on-the-app-store/black/zh-cn?releaseDate=1776211200)](https://apps.apple.com/cn/app/cocono-%E8%AE%B0%E8%B4%A6-beancount-%E7%A7%BB%E5%8A%A8%E5%AE%A2%E6%88%B7%E7%AB%AF/id6497061011?itscg=30200&itsct=apps_box_badge&mttnsubad=6497061011)
+
 ## Status
 
 Current implementation is focused on query execution and Python behavior alignment.
