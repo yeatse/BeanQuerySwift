@@ -333,4 +333,58 @@ struct BQLExecutionTests {
         ])
         #expect(counter.yielded == 3)
     }
+
+    private var subscriptContext: QueryContext {
+        QueryContext(tables: [
+            "postings": [
+                [
+                    "narration": .string("Coffee"),
+                    "meta": .dict(["filename": .string("ledger.bean"), "lineno": .int(12)]),
+                    "date": .date(date(2024, 1, 1)),
+                ],
+                [
+                    "narration": .string("Lunch"),
+                    "meta": .null,
+                    "date": .date(date(2024, 1, 2)),
+                ],
+            ]
+        ])
+    }
+
+    @Test func runSubscriptOnMetadataDictionary() throws {
+        let result = try engine.run(
+            "SELECT meta['filename'] AS file, meta['lineno'] AS line FROM #postings LIMIT 1",
+            in: subscriptContext
+        )
+
+        #expect(result.columns == ["file", "line"])
+        #expect(result.rows == [[.string("ledger.bean"), .int(12)]])
+    }
+
+    @Test func runSubscriptReturnsNullForMissingKeyAndNullOperand() throws {
+        let result = try engine.run(
+            "SELECT narration, meta['nonexistent'] AS missing FROM #postings",
+            in: subscriptContext
+        )
+
+        #expect(result.rows == [
+            [.string("Coffee"), .null],
+            [.string("Lunch"), .null],
+        ])
+    }
+
+    @Test func runSubscriptInWhereClause() throws {
+        let result = try engine.run(
+            "SELECT narration FROM #postings WHERE meta['lineno'] = 12",
+            in: subscriptContext
+        )
+
+        #expect(result.rows == [[.string("Coffee")]])
+    }
+
+    @Test func runSubscriptOnNonDictionaryValueFails() throws {
+        #expect(throws: BQLExecutionError.invalidType) {
+            try engine.run("SELECT date['lineno'] FROM #postings", in: subscriptContext)
+        }
+    }
 }

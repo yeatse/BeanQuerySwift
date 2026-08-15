@@ -31,6 +31,7 @@ Implemented clauses and features:
 - `DISTINCT`
 - Positional and named placeholders (`%s`, `%(name)s`)
 - Line comments with both `;` and `--`
+- Attribute and subscript access (`entry.date`, `meta['lineno']`, `entry.meta['payer']`)
 
 Implemented tables from Beancount adapters:
 
@@ -61,7 +62,8 @@ Date/interval arithmetic now supports Python-like behavior for:
 
 - No DDL/DML (`CREATE TABLE`, `INSERT`, etc.)
 - No `JOIN`
-- `attribute` and `subscript` expressions are parsed in AST but not yet executable
+- Unaliased `attribute` / `subscript` targets are named `attribute` / `subscript` instead of the
+  source text Python renders, so use `AS` when the column name matters
 - Feature surface is intentionally query-first in phase 1; extension points are kept in compiler/executor design
 
 ## Requirements

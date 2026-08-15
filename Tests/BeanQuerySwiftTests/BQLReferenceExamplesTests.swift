@@ -248,4 +248,122 @@ struct BQLReferenceExamplesTests {
             return
         }
     }
+
+    @Test func transactionsTableMetadataSubscript() throws {
+        let result = try engine.run(
+            """
+            SELECT meta['filename'] AS file, meta['lineno'] AS line, meta['payer'] AS payer \
+            FROM transactions WHERE narration = 'Dining out'
+            """,
+            in: try context()
+        )
+        #expect(result.columns == ["file", "line", "payer"])
+        #expect(result.rows == [[
+            .string("test-bql-reference.bean"),
+            .int(20),
+            .string("Alice"),
+        ]])
+    }
+
+    @Test func entriesTableMetadataSubscriptMatchesDedicatedColumns() throws {
+        let result = try engine.run(
+            """
+            SELECT filename, lineno, meta['filename'] AS metaFile, meta['lineno'] AS metaLine \
+            FROM entries WHERE type = 'transaction' ORDER BY date LIMIT 1
+            """,
+            in: try context()
+        )
+        #expect(result.rows.count == 1)
+        #expect(result.rows[0][0] == result.rows[0][2])
+        #expect(result.rows[0][1] == result.rows[0][3])
+    }
+
+    @Test func postingsTableEntryMetadataSubscript() throws {
+        let result = try engine.run(
+            "SELECT entry.meta['payer'] AS payer, entry_meta['payer'] AS same WHERE narration = 'Dining out'",
+            in: try context()
+        )
+        #expect(result.rows.count == 2)
+        for row in result.rows {
+            #expect(row[0] == .string("Alice"))
+            #expect(row[1] == .string("Alice"))
+        }
+    }
+
+    // The expected line numbers below are 1-based and were verified by running the
+    // same ledger through Python `bean-query`. Beancount reports 1-based lines while
+    // the tree-sitter parser records 0-based rows, so these lock the conversion.
+
+    @Test func entriesTableLineNumbersMatchPython() throws {
+        let result = try engine.run(
+            """
+            SELECT narration, lineno, meta['lineno'] AS metaLine \
+            FROM entries WHERE type = 'transaction' ORDER BY date
+            """,
+            in: try context()
+        )
+        #expect(result.rows == [
+            [.string("Opening"), .int(12), .int(12)],
+            [.string("Monthly salary"), .int(16), .int(16)],
+            [.string("Dining out"), .int(20), .int(20)],
+            [.string("Weekly groceries"), .int(25), .int(25)],
+            [.string("Subway pass"), .int(30), .int(30)],
+            [.string("Dinner"), .int(34), .int(34)],
+        ])
+    }
+
+    @Test func transactionsTableLineNumbersMatchPython() throws {
+        let result = try engine.run(
+            "SELECT narration, meta['lineno'] AS line FROM transactions",
+            in: try context()
+        )
+        #expect(result.rows == [
+            [.string("Opening"), .int(12)],
+            [.string("Monthly salary"), .int(16)],
+            [.string("Dining out"), .int(20)],
+            [.string("Weekly groceries"), .int(25)],
+            [.string("Subway pass"), .int(30)],
+            [.string("Dinner"), .int(34)],
+        ])
+    }
+
+    /// Postings report their own line, which differs from the parent directive line
+    /// and skips directive metadata lines such as the `payer:` entry of "Dining out".
+    @Test func postingsTableLineNumbersMatchPython() throws {
+        let result = try engine.run(
+            """
+            SELECT account, lineno, meta['lineno'] AS metaLine, entry_meta['lineno'] AS entryLine, \
+            entry.meta['lineno'] AS attributeLine WHERE narration = 'Dining out'
+            """,
+            in: try context()
+        )
+        #expect(result.rows == [
+            [.string("Expenses:Food:Restaurant"), .int(22), .int(22), .int(20), .int(20)],
+            [.string("Assets:Cash"), .int(23), .int(23), .int(20), .int(20)],
+        ])
+    }
+
+    /// The parser records `filename` only on the directive, but Python exposes it
+    /// in posting metadata too, so it falls back the way the column does.
+    @Test func postingsTableMetadataFilenameMatchesColumn() throws {
+        let result = try engine.run(
+            "SELECT filename, meta['filename'] AS metaFile WHERE narration = 'Dining out'",
+            in: try context()
+        )
+        #expect(result.rows == [
+            [.string("test-bql-reference.bean"), .string("test-bql-reference.bean")],
+            [.string("test-bql-reference.bean"), .string("test-bql-reference.bean")],
+        ])
+    }
+
+    @Test func postingsTableLocationUsesOneBasedLineNumber() throws {
+        let result = try engine.run(
+            "SELECT location WHERE narration = 'Dining out'",
+            in: try context()
+        )
+        #expect(result.rows == [
+            [.string("test-bql-reference.bean:22:")],
+            [.string("test-bql-reference.bean:23:")],
+        ])
+    }
 }
