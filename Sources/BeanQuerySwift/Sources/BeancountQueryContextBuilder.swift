@@ -436,13 +436,19 @@ public enum BeancountQueryContextBuilder {
         return .string(parts.joined(separator: " | "))
     }
 
-    /// Directives store their position as a `range` entry rather than a `lineno`
-    /// one, so the line number is added explicitly here. Python beanquery always
-    /// exposes `lineno` in the metadata dictionary, and `meta['lineno']` has to
-    /// agree with the dedicated `lineno` column.
+    /// Python beanquery always exposes the source location in the metadata
+    /// dictionary, and `meta['filename']` and `meta['lineno']` have to agree with
+    /// the dedicated columns. Directives store their position as a `range` entry
+    /// rather than a `lineno` one, and the parser records `filename` only on the
+    /// directive, so both are filled in here.
+    ///
+    /// - Parameters:
+    ///   - lineNumber: Replaces the line number derived from `metadata`.
+    ///   - filename: Used when `metadata` carries no `filename` of its own.
     static func runtimeMetaDictionary(
         from metadata: MetaData,
-        lineNumber: Int? = nil
+        lineNumber: Int? = nil,
+        filename: String? = nil
     ) -> [String: RuntimeValue] {
         var result: [String: RuntimeValue] = [:]
         for (key, value) in metadata {
@@ -450,6 +456,9 @@ public enum BeancountQueryContextBuilder {
         }
         if let lineNumber = lineNumber ?? metadata.lineno {
             result["lineno"] = .int(lineNumber)
+        }
+        if result["filename"] == nil, let filename {
+            result["filename"] = .string(filename)
         }
         return result
     }
@@ -631,7 +640,8 @@ struct BeancountPostingQueryRow: Sendable {
                 .dict(
                     BeancountQueryContextBuilder.runtimeMetaDictionary(
                         from: meta,
-                        lineNumber: postingLineNumber(row)
+                        lineNumber: postingLineNumber(row),
+                        filename: row.directive.meta.filename
                     )
                 )
             } ?? .null

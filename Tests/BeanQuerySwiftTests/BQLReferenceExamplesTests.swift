@@ -343,6 +343,19 @@ struct BQLReferenceExamplesTests {
         ])
     }
 
+    /// The parser records `filename` only on the directive, but Python exposes it
+    /// in posting metadata too, so it falls back the way the column does.
+    @Test func postingsTableMetadataFilenameMatchesColumn() throws {
+        let result = try engine.run(
+            "SELECT filename, meta['filename'] AS metaFile WHERE narration = 'Dining out'",
+            in: try context()
+        )
+        #expect(result.rows == [
+            [.string("test-bql-reference.bean"), .string("test-bql-reference.bean")],
+            [.string("test-bql-reference.bean"), .string("test-bql-reference.bean")],
+        ])
+    }
+
     @Test func postingsTableLocationUsesOneBasedLineNumber() throws {
         let result = try engine.run(
             "SELECT location WHERE narration = 'Dining out'",
