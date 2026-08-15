@@ -257,6 +257,30 @@ struct BeancountSourceAdapterTests {
         #expect(result.rows == expected.map { [.string($0.0), .inventory($0.1), .inventory($0.2)] })
     }
 
+    /// A grouped aggregate reads `balance` only when evaluation actually
+    /// reaches it: `AND` short-circuits, so the `1000 USD` row never touches the
+    /// running inventory and the `-80 USD` row sees `-80 USD`, not `920 USD`.
+    /// `bean-query` prints `FALSE` for the first query and `(920 USD)` for the
+    /// second, where the column is read unconditionally.
+    @Test func runGroupedBalanceFollowsShortCircuitedReads() throws {
+        let context = BeancountQueryContextBuilder.makeContext(from: try BeancountTestFixtures.sampleLedger())
+
+        let shortCircuited = try engine.run(
+            """
+            SELECT year, last(number < 0 AND str(balance) ~ '920') \
+            FROM postings WHERE account = 'Assets:Cash' GROUP BY year
+            """,
+            in: context
+        )
+        #expect(shortCircuited.rows == [[.int(2024), .bool(false)]])
+
+        let unconditional = try engine.run(
+            "SELECT year, last(str(balance)) FROM postings WHERE account = 'Assets:Cash' GROUP BY year",
+            in: context
+        )
+        #expect(unconditional.rows == [[.int(2024), .string("920.00 USD")]])
+    }
+
     /// Without `ORDER BY`, groups come out in first-appearance order, like
     /// beanquery iterating its insertion-ordered aggregates dict. `bean-query`:
     /// `Assets:Cash 920`, `Income:Salary -1000`, `Expenses:Food 80`.

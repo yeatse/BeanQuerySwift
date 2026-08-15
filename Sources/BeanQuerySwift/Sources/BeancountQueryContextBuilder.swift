@@ -529,7 +529,8 @@ final class DirectiveIDCache: Sendable {
 /// Beancount computes `balance` lazily: a single inventory accumulates over the
 /// rows that actually reach the column, in scan order, so filtered-out rows do
 /// not contribute. Repeated reads of the same row must not advance it, which is
-/// what `lastRowID` guards.
+/// what `lastRowID` guards — the same one-entry cache beanquery keys on its row
+/// id (`sources/beancount.py`, `@cache(maxsize=1)` on `balance`).
 final class PostingBalanceAccumulator: Sendable {
     private struct State {
         var running = Inventory()
@@ -573,10 +574,6 @@ struct BeancountPostingQueryRow: Sendable {
         "narration",
         "position",
     ]
-
-    /// `balance` advances a running inventory as rows reach it, so its value
-    /// only means anything when read in scan order.
-    static let scanOrderColumns = ["balance"]
 
     private static let accessors: [String: @Sendable (BeancountPostingQueryRow) -> RuntimeValue] = [
         "account": { .string($0.posting.account.id) },

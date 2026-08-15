@@ -2,6 +2,11 @@ import Foundation
 import BeancountSwift
 
 struct QueryExecutor {
+    /// Kept in sync with `BQLCompiler.aggregateFunctions`.
+    private static let aggregateFunctionNames: Set<String> = [
+        "count", "sum", "first", "last", "min", "max"
+    ]
+
     private struct DateStride: Equatable, Sendable {
         var years: Int
         var months: Int
@@ -152,7 +157,7 @@ struct QueryExecutor {
                     guard try evaluateBoolean(
                         filter,
                         row: row,
-                        group: nil,
+                        aggregates: nil,
                         context: context
                     ) else {
                         continue
@@ -163,7 +168,7 @@ struct QueryExecutor {
                     try evaluateExpression(
                         target.expression,
                         row: row,
-                        group: nil,
+                        aggregates: nil,
                         context: context
                     )
                 }
@@ -173,56 +178,92 @@ struct QueryExecutor {
         }
 
         let groupIndexes = query.groupIndexes ?? []
-        // beanquery updates every aggregate in a single scan-order pass
-        // (`query_execute.execute_select`), so a column like `balance` advances
-        // exactly once per row, in the order the source produced it. We instead
-        // buffer rows into buckets and evaluate them afterwards, which would
-        // accumulate in bucket order and re-accumulate for each aggregate over
-        // the same bucket — so pin those columns while scanning.
-        let readColumns = readColumns(of: query)
-        var groupOrder: [GroupKey] = []
-        var buckets: [GroupKey: [QueryRow]] = [:]
+        // Like beanquery (`query_execute.execute_select`), the aggregates are
+        // fed from a single pass over the source: every aggregate argument is
+        // evaluated once per row, as the row arrives. Columns such as `balance`
+        // accumulate as they are read, so buffering the rows and evaluating them
+        // afterwards would accumulate in group order, and re-evaluating them
+        // once per aggregate would accumulate twice.
+        let aggregateExpressions = self.aggregateExpressions(of: query)
+        // Groups are kept in an array so they come out in first-appearance
+        // order, like beanquery iterating its insertion-ordered `aggregates`
+        // dict; a Swift Dictionary hands back a different order on every run.
+        var groupIndexOfKey: [GroupKey: Int] = [:]
+        var groups: [(key: GroupKey, state: GroupState)] = []
 
         for row in rows {
             if let filter = query.filter {
                 guard try evaluateBoolean(
                     filter,
                     row: row,
-                    group: nil,
+                    aggregates: nil,
                     context: context
                 ) else {
                     continue
                 }
             }
 
-            let scannedRow = row.freezingScanOrderColumns(readBy: readColumns)
             let keyValues = try groupIndexes.map { index in
                 try evaluateExpression(
                     query.targets[index].expression,
-                    row: scannedRow,
-                    group: nil,
+                    row: row,
+                    aggregates: nil,
                     context: context
                 )
             }
+
             let key = GroupKey(values: keyValues)
-            if buckets[key] == nil {
-                groupOrder.append(key)
+            let groupIndex: Int
+            if let existing = groupIndexOfKey[key] {
+                groupIndex = existing
+            } else {
+                groupIndex = groups.count
+                groupIndexOfKey[key] = groupIndex
+                groups.append((
+                    key,
+                    GroupState(
+                        representativeRow: row,
+                        argumentValues: Array(repeating: [], count: aggregateExpressions.count)
+                    )
+                ))
             }
-            buckets[key, default: []].append(scannedRow)
+
+            groups[groupIndex].state.rowCount += 1
+            for (index, aggregate) in aggregateExpressions.enumerated() {
+                guard let argument = aggregate.argument else {
+                    continue
+                }
+                let value = try evaluateExpression(
+                    argument,
+                    row: row,
+                    aggregates: nil,
+                    context: context
+                )
+                groups[groupIndex].state.argumentValues[index].append(value)
+            }
         }
 
-        // Groups come out in first-appearance order, like beanquery iterating
-        // its insertion-ordered `aggregates` dict; a Swift Dictionary would
-        // hand back a different order on every run.
         var output: [[RuntimeValue]] = []
-        for key in groupOrder {
-            guard let groupRows = buckets[key], let first = groupRows.first else { continue }
+        for (key, state) in groups {
+            let aggregates = AggregateResults(
+                expressions: aggregateExpressions,
+                values: try aggregateExpressions.enumerated().map { index, aggregate in
+                    try reduceAggregate(
+                        aggregate,
+                        argumentValues: state.argumentValues[index],
+                        rowCount: state.rowCount
+                    )
+                }
+            )
 
-            let values = try query.targets.map { target in
-                try evaluateExpression(
+            let values = try query.targets.enumerated().map { index, target in
+                if let keyIndex = groupIndexes.firstIndex(of: index) {
+                    return key.values[keyIndex]
+                }
+                return try evaluateExpression(
                     target.expression,
-                    row: first,
-                    group: groupRows,
+                    row: state.representativeRow,
+                    aggregates: aggregates,
                     context: context
                 )
             }
@@ -239,42 +280,91 @@ struct QueryExecutor {
         return applyOrdering(output, orderSpec: query.orderSpec)
     }
 
-    /// Source columns the query reads, lowercased as the row storages key them.
-    private func readColumns(of query: EvalQuery) -> Set<String> {
-        var columns: Set<String> = []
-        for target in query.targets {
-            collectColumns(target.expression, into: &columns)
+    /// The aggregate calls the query's non-key targets make, in the order a
+    /// pre-order walk finds them.
+    ///
+    /// beanquery collects the same set with `get_columns_and_aggregates` and
+    /// updates each of them per row; nested aggregates are rejected by the
+    /// compiler, so the walk stops at an aggregate call.
+    private func aggregateExpressions(of query: EvalQuery) -> [AggregateCall] {
+        let groupIndexes = Set(query.groupIndexes ?? [])
+        var calls: [AggregateCall] = []
+
+        for (index, target) in query.targets.enumerated() where !groupIndexes.contains(index) {
+            collectAggregateCalls(target.expression, into: &calls)
         }
-        if let filter = query.filter {
-            collectColumns(filter, into: &columns)
-        }
-        return columns
+        return calls
     }
 
-    private func collectColumns(_ expression: BQLExpression, into columns: inout Set<String>) {
+    private func collectAggregateCalls(_ expression: BQLExpression, into calls: inout [AggregateCall]) {
         switch expression {
-        case .column(let name):
-            columns.insert(name.lowercased())
-
-        case .function(_, let args), .and(let args), .or(let args):
+        case .function(let name, let args):
+            let normalized = name.lowercased()
+            if Self.aggregateFunctionNames.contains(normalized) {
+                let call = AggregateCall(name: normalized, args: args)
+                if !calls.contains(call) {
+                    calls.append(call)
+                }
+                return
+            }
             for arg in args {
-                collectColumns(arg, into: &columns)
+                collectAggregateCalls(arg, into: &calls)
+            }
+
+        case .and(let args), .or(let args):
+            for arg in args {
+                collectAggregateCalls(arg, into: &calls)
             }
 
         case .unary(_, let operand), .attribute(let operand, _), .subscriptExpr(let operand, _):
-            collectColumns(operand, into: &columns)
+            collectAggregateCalls(operand, into: &calls)
 
         case .binary(_, let left, let right), .anyAll(_, _, let left, let right):
-            collectColumns(left, into: &columns)
-            collectColumns(right, into: &columns)
+            collectAggregateCalls(left, into: &calls)
+            collectAggregateCalls(right, into: &calls)
 
         case .between(let value, let lower, let upper):
-            collectColumns(value, into: &columns)
-            collectColumns(lower, into: &columns)
-            collectColumns(upper, into: &columns)
+            collectAggregateCalls(value, into: &calls)
+            collectAggregateCalls(lower, into: &calls)
+            collectAggregateCalls(upper, into: &calls)
 
-        case .constant, .placeholder, .select, .asterisk:
+        case .column, .constant, .placeholder, .select, .asterisk:
             break
+        }
+    }
+
+    /// Fold the per-row argument values a group collected into the aggregate's
+    /// result. The values arrive in scan order, so `first`/`last` are the first
+    /// and last row of the group.
+    private func reduceAggregate(
+        _ aggregate: AggregateCall,
+        argumentValues values: [RuntimeValue],
+        rowCount: Int
+    ) throws -> RuntimeValue {
+        switch aggregate.name {
+        case "count":
+            if aggregate.isCountStar {
+                return .int(rowCount)
+            }
+            return .int(values.filter { $0 != .null }.count)
+
+        case "sum":
+            return try sum(values)
+
+        case "first":
+            return values.first ?? .null
+
+        case "last":
+            return values.last ?? .null
+
+        case "min":
+            return values.filter { $0 != .null }.min { compare($0, $1) == .orderedAscending } ?? .null
+
+        case "max":
+            return values.filter { $0 != .null }.max { compare($0, $1) == .orderedAscending } ?? .null
+
+        default:
+            throw BQLExecutionError.unsupportedFunction(aggregate.name)
         }
     }
 
@@ -298,7 +388,7 @@ struct QueryExecutor {
                 guard try evaluateBoolean(
                     filter,
                     row: row,
-                    group: nil,
+                    aggregates: nil,
                     context: context
                 ) else {
                     continue
@@ -309,7 +399,7 @@ struct QueryExecutor {
                 try evaluateExpression(
                     query.targets[index].expression,
                     row: row,
-                    group: nil,
+                    aggregates: nil,
                     context: context
                 )
             }
@@ -408,17 +498,17 @@ struct QueryExecutor {
     private func evaluateBoolean(
         _ expression: BQLExpression,
         row: QueryRow,
-        group: [QueryRow]?,
+        aggregates: AggregateResults?,
         context: QueryContext
     ) throws -> Bool {
-        let value = try evaluateExpression(expression, row: row, group: group, context: context)
+        let value = try evaluateExpression(expression, row: row, aggregates: aggregates, context: context)
         return try asBool(value)
     }
 
     private func evaluateExpression(
         _ expression: BQLExpression,
         row: QueryRow,
-        group: [QueryRow]?,
+        aggregates: AggregateResults?,
         context: QueryContext
     ) throws -> RuntimeValue {
         switch expression {
@@ -432,7 +522,7 @@ struct QueryExecutor {
             throw BQLExecutionError.unsupportedExpression("placeholder \(placeholder)")
 
         case .unary(let op, let operand):
-            let value = try evaluateExpression(operand, row: row, group: group, context: context)
+            let value = try evaluateExpression(operand, row: row, aggregates: aggregates, context: context)
             switch op {
             case .not:
                 return .bool(try !asBool(value))
@@ -445,13 +535,13 @@ struct QueryExecutor {
             }
 
         case .binary(let op, let leftExpr, let rightExpr):
-            let left = try evaluateExpression(leftExpr, row: row, group: group, context: context)
-            let right = try evaluateExpression(rightExpr, row: row, group: group, context: context)
+            let left = try evaluateExpression(leftExpr, row: row, aggregates: aggregates, context: context)
+            let right = try evaluateExpression(rightExpr, row: row, aggregates: aggregates, context: context)
             return try evaluateBinary(op: op, left: left, right: right)
 
         case .and(let args):
             for arg in args {
-                if try !evaluateBoolean(arg, row: row, group: group, context: context) {
+                if try !evaluateBoolean(arg, row: row, aggregates: aggregates, context: context) {
                     return .bool(false)
                 }
             }
@@ -459,16 +549,16 @@ struct QueryExecutor {
 
         case .or(let args):
             for arg in args {
-                if try evaluateBoolean(arg, row: row, group: group, context: context) {
+                if try evaluateBoolean(arg, row: row, aggregates: aggregates, context: context) {
                     return .bool(true)
                 }
             }
             return .bool(false)
 
         case .between(let valueExpr, let lowerExpr, let upperExpr):
-            let value = try evaluateExpression(valueExpr, row: row, group: group, context: context)
-            let lower = try evaluateExpression(lowerExpr, row: row, group: group, context: context)
-            let upper = try evaluateExpression(upperExpr, row: row, group: group, context: context)
+            let value = try evaluateExpression(valueExpr, row: row, aggregates: aggregates, context: context)
+            let lower = try evaluateExpression(lowerExpr, row: row, aggregates: aggregates, context: context)
+            let upper = try evaluateExpression(upperExpr, row: row, aggregates: aggregates, context: context)
             guard value != .null, lower != .null, upper != .null else {
                 return .null
             }
@@ -478,8 +568,8 @@ struct QueryExecutor {
                          && (upperCmp == .orderedSame || upperCmp == .orderedAscending))
 
         case .anyAll(let op, let quantifier, let leftExpr, let rightExpr):
-            let left = try evaluateExpression(leftExpr, row: row, group: group, context: context)
-            let right = try evaluateExpression(rightExpr, row: row, group: group, context: context)
+            let left = try evaluateExpression(leftExpr, row: row, aggregates: aggregates, context: context)
+            let right = try evaluateExpression(rightExpr, row: row, aggregates: aggregates, context: context)
             guard left != .null, right != .null else {
                 return .null
             }
@@ -500,7 +590,7 @@ struct QueryExecutor {
             }
 
         case .attribute(let operandExpr, let name):
-            let value = try evaluateExpression(operandExpr, row: row, group: group, context: context)
+            let value = try evaluateExpression(operandExpr, row: row, aggregates: aggregates, context: context)
             return try resolveAttribute(value, name: name)
 
         case .subscriptExpr:
@@ -517,7 +607,7 @@ struct QueryExecutor {
                 name: name,
                 args: args,
                 row: row,
-                group: group,
+                aggregates: aggregates,
                 context: context
             )
         }
@@ -527,7 +617,7 @@ struct QueryExecutor {
         name: String,
         args: [BQLExpression],
         row: QueryRow,
-        group: [QueryRow]?,
+        aggregates: AggregateResults?,
         context: QueryContext
     ) throws -> RuntimeValue {
         let normalized = name.lowercased()
@@ -537,7 +627,7 @@ struct QueryExecutor {
                 throw BQLExecutionError.unsupportedFunction(name)
             }
             for arg in args {
-                let value = try evaluateExpression(arg, row: row, group: group, context: context)
+                let value = try evaluateExpression(arg, row: row, aggregates: aggregates, context: context)
                 if value != .null {
                     return value
                 }
@@ -545,84 +635,22 @@ struct QueryExecutor {
             return .null
         }
 
-        if ["count", "sum", "min", "max", "first", "last"].contains(normalized) {
-            guard let group else {
+        if Self.aggregateFunctionNames.contains(normalized) {
+            // Aggregates are folded from the values collected during the scan;
+            // reaching one outside a grouped query is a compile-time error.
+            guard let value = aggregates?.value(for: AggregateCall(name: normalized, args: args)) else {
                 throw BQLExecutionError.unsupportedFunction(name)
             }
-            return try evaluateAggregateFunction(
-                name: normalized,
-                args: args,
-                rows: group,
-                context: context
-            )
+            return value
         }
 
-        let values = try args.map { try evaluateExpression($0, row: row, group: group, context: context) }
+        let values = try args.map { try evaluateExpression($0, row: row, aggregates: aggregates, context: context) }
         return try BuiltinFunctionEvaluator(context: context).evaluate(
             name: name,
             normalizedName: normalized,
             arguments: values,
             row: row
         )
-    }
-
-    private func evaluateAggregateFunction(
-        name: String,
-        args: [BQLExpression],
-        rows: [QueryRow],
-        context: QueryContext
-    ) throws -> RuntimeValue {
-        switch name {
-        case "count":
-            if args.count == 1, args[0] == .asterisk {
-                return .int(rows.count)
-            }
-            let values = try evaluateOverRows(args.first, rows: rows, context: context)
-            return .int(values.filter { $0 != .null }.count)
-
-        case "sum":
-            let values = try evaluateOverRows(args.first, rows: rows, context: context)
-            return try sum(values)
-
-        case "first":
-            let values = try evaluateOverRows(args.first, rows: rows, context: context)
-            return values.first ?? .null
-
-        case "last":
-            let values = try evaluateOverRows(args.first, rows: rows, context: context)
-            return values.last ?? .null
-
-        case "min":
-            let values = try evaluateOverRows(args.first, rows: rows, context: context).filter { $0 != .null }
-            guard let minValue = values.min(by: { compare($0, $1) == .orderedAscending }) else {
-                return .null
-            }
-            return minValue
-
-        case "max":
-            let values = try evaluateOverRows(args.first, rows: rows, context: context).filter { $0 != .null }
-            guard let maxValue = values.max(by: { compare($0, $1) == .orderedAscending }) else {
-                return .null
-            }
-            return maxValue
-
-        default:
-            throw BQLExecutionError.unsupportedFunction(name)
-        }
-    }
-
-    private func evaluateOverRows(
-        _ expression: BQLExpression?,
-        rows: [QueryRow],
-        context: QueryContext
-    ) throws -> [RuntimeValue] {
-        guard let expression else {
-            return []
-        }
-
-        return try rows.map { row in
-            try evaluateExpression(expression, row: row, group: nil, context: context)
-        }
     }
 
     private func evaluateBinary(op: BQLBinaryOperator, left: RuntimeValue, right: RuntimeValue) throws -> RuntimeValue {
@@ -1191,4 +1219,45 @@ private func directiveMetaValue(_ value: MetaDataValue) -> RuntimeValue {
 
 private struct GroupKey: Hashable {
     var values: [RuntimeValue]
+}
+
+/// An aggregate call the query makes, e.g. `last(balance)`.
+///
+/// Identical calls share one entry: reading a column twice for the same row
+/// yields the same value anyway, and for `balance` a second read must not
+/// advance the running inventory — beanquery relies on a one-entry cache keyed
+/// by row id for the same reason.
+private struct AggregateCall: Equatable {
+    let name: String
+    let args: [BQLExpression]
+
+    var isCountStar: Bool {
+        args.count == 1 && args[0] == .asterisk
+    }
+
+    /// The expression evaluated once per row, if the call takes one.
+    var argument: BQLExpression? {
+        isCountStar ? nil : args.first
+    }
+}
+
+/// What a group accumulates while the source is scanned.
+private struct GroupState {
+    /// Kept for the parts of a target that read neither the group key nor an
+    /// aggregate; the compiler rejects bare columns there, so this only backs
+    /// row-independent expressions.
+    var representativeRow: QueryRow
+    var rowCount = 0
+    var argumentValues: [[RuntimeValue]]
+}
+
+/// The folded aggregate values of one group, looked up while the output row is
+/// evaluated.
+private struct AggregateResults {
+    let expressions: [AggregateCall]
+    let values: [RuntimeValue]
+
+    func value(for call: AggregateCall) -> RuntimeValue? {
+        expressions.firstIndex(of: call).map { values[$0] }
+    }
 }
