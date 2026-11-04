@@ -81,7 +81,10 @@ struct QueryModelsCoverageTests {
             (.unsupportedExpression("expr"), "unsupported expression: expr"),
             (.unsupportedFunction("fn"), "unsupported function: fn"),
             (.unsupportedOperator, "unsupported operator"),
-            (.invalidType, "invalid runtime type"),
+            (.invalidType(operation: "subscript", expected: "dict", actual: "date"),
+             "subscript: expected dict, got date"),
+            (.invalidBinaryOperator(op: .matches, leftType: "list[str]", rightType: "str"),
+             "operator \"matches(list[str], str)\" not supported"),
             (.invalidPivotByColumns, "invalid PIVOT BY columns"),
         ]
 

@@ -62,6 +62,14 @@ Date/interval arithmetic now supports Python-like behavior for:
 - `date - date` (returns days)
 - `interval - interval`
 
+NULL checks use `IS NULL` / `IS NOT NULL`. Ordinary comparisons (`=`, `!=`, `<`,
+`<=`, `>`, `>=`) with an explicit `NULL` operand fail during compilation, matching
+Python `beanquery`.
+
+Runtime type errors identify the operator or operation and the operand types.
+Function arguments, aggregates, boolean expressions, attribute access, and subscripts
+report their expected and actual types without including ledger values.
+
 ## Known Gaps
 
 - No DDL/DML (`CREATE TABLE`, `INSERT`, etc.)

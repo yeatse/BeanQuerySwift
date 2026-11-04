@@ -17,6 +17,27 @@ public enum RuntimeValue: Hashable, Sendable {
     case list([RuntimeValue])
     case null
 
+    /// Type names for diagnostics, without including ledger values.
+    var diagnosticTypeName: String {
+        switch self {
+        case .int: return "int"
+        case .decimal: return "decimal"
+        case .amount: return "amount"
+        case .position: return "position"
+        case .inventory: return "inventory"
+        case .directive: return "directive"
+        case .dict: return "dict"
+        case .structure(let name, _): return name
+        case .string: return "str"
+        case .bool: return "bool"
+        case .date: return "date"
+        case .list(let values):
+            let elementTypes = Set(values.map(\.diagnosticTypeName)).sorted()
+            return elementTypes.isEmpty ? "list" : "list[\(elementTypes.joined(separator: " | "))]"
+        case .null: return "null"
+        }
+    }
+
     private static func formatDate(_ date: Date) -> String {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = TimeZone.current
@@ -304,7 +325,8 @@ enum BQLExecutionError: LocalizedError, Equatable {
     case unsupportedExpression(String)
     case unsupportedFunction(String)
     case unsupportedOperator
-    case invalidType
+    case invalidType(operation: String, expected: String, actual: String)
+    case invalidBinaryOperator(op: BQLBinaryOperator, leftType: String, rightType: String)
     case invalidPivotByColumns
     
     var errorDescription: String? {
@@ -319,8 +341,10 @@ enum BQLExecutionError: LocalizedError, Equatable {
             return "unsupported function: \(function)"
         case .unsupportedOperator:
             return "unsupported operator"
-        case .invalidType:
-            return "invalid runtime type"
+        case .invalidType(let operation, let expected, let actual):
+            return "\(operation): expected \(expected), got \(actual)"
+        case .invalidBinaryOperator(let op, let leftType, let rightType):
+            return "operator \"\(op)(\(leftType), \(rightType))\" not supported"
         case .invalidPivotByColumns:
             return "invalid PIVOT BY columns"
         }

@@ -211,6 +211,11 @@ private struct OperatorRegistry {
     }
 
     private func comparable(left: BQLType, right: BQLType) -> Bool {
+        // NULL has no comparison overload in Python beanquery. Check before
+        // the dynamic-object fallback; null predicates use IS [NOT] NULL.
+        if left == .null || right == .null {
+            return false
+        }
         if left == .object || right == .object {
             return true
         }

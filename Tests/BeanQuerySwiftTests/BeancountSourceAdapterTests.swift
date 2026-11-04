@@ -540,6 +540,21 @@ struct BeancountSourceAdapterTests {
         #expect(result.rows[0][3] == .list([.string("Assets:Cash")]))
     }
 
+    @Test func transactionAccountsRegexErrorIncludesOperatorAndTypes() throws {
+        let context = BeancountQueryContextBuilder.makeContext(from: try BeancountTestFixtures.directiveTablesLedger())
+        let query = """
+            SELECT payee, count(*) AS transaction_count FROM #transactions
+            WHERE accounts ?~ '^Expenses(:|$)' AND payee != ''
+            GROUP BY payee ORDER BY transaction_count, payee LIMIT 10
+            """
+        do {
+            _ = try engine.run(query, in: context)
+            Issue.record("expected accounts regex type mismatch")
+        } catch {
+            #expect(error.localizedDescription == "operator \"matches(list[str], str)\" not supported")
+        }
+    }
+
     @Test func runQueryAgainstTransactionsTable() throws {
         let context = BeancountQueryContextBuilder.makeContext(from: try BeancountTestFixtures.directiveTablesLedger())
         let result = try engine.run(
