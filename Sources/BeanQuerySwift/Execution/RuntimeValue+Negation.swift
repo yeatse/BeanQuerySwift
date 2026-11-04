@@ -16,7 +16,7 @@ extension RuntimeValue {
         case .null:
             return .null
         default:
-            throw BQLExecutionError.invalidType
+            throw BQLExecutionError.invalidType(operation: "neg", expected: "int | decimal | amount | position | inventory", actual: diagnosticTypeName)
         }
     }
 }

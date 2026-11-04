@@ -6,6 +6,71 @@ import Testing
 struct BQLExecutionTests {
     private let engine = BeanQueryEngine()
 
+    @Test func payeeNullComparisonThrowsBeforeReadingRows() throws {
+        let counter = RowCounter()
+        let context = QueryContext(providers: ["postings": StreamingProvider(counter: counter)])
+        #expect(throws: BQLCompileError.self) {
+            try engine.run("SELECT payee WHERE payee != NULL", in: context)
+        }
+        #expect(counter.yielded == 0)
+    }
+
+    @Test func payeeIsNotNullCountsDistinctTransactions() throws {
+        let context = QueryContext(tables: ["postings": [
+            ["id": .string("1"), "account": .string("Expenses:Food"), "payee": .string("Alice")],
+            ["id": .string("1"), "account": .string("Expenses:Tax"), "payee": .string("Alice")],
+            ["id": .string("2"), "account": .string("Expenses"), "payee": .string("Alice")],
+            ["id": .string("3"), "account": .string("Expenses:Food"), "payee": .null],
+            ["id": .string("4"), "account": .string("Expenses:Food"), "payee": .string("")],
+            ["id": .string("5"), "account": .string("Assets:Cash"), "payee": .string("Bob")],
+        ]])
+        let result = try engine.run("""
+            SELECT payee, count(*) AS transaction_count
+            FROM (SELECT DISTINCT id, payee
+                  WHERE account ~ '^Expenses(:|$)' AND payee IS NOT NULL AND payee != '')
+            GROUP BY payee ORDER BY transaction_count, payee LIMIT 5
+            """, in: context)
+        #expect(result.rows == [[.string("Alice"), .int(2)]])
+    }
+
+    @Test(arguments: [("~", "match"), ("!~", "notMatch"), ("?~", "matches")])
+    func regexTypeErrorsIncludeBothOperandTypes(_ symbol: String, _ name: String) throws {
+        let context = QueryContext(tables: ["postings": [
+            ["accounts": .list([.string("Expenses:Food")]), "number": .int(1)],
+        ]])
+        for (expression, types) in [
+            ("accounts \(symbol) 'Expenses'", "list[str], str"),
+            ("'Expenses' \(symbol) number", "str, int"),
+        ] {
+            do {
+                _ = try engine.run("SELECT \(expression)", in: context)
+                Issue.record("expected regex type mismatch")
+            } catch {
+                #expect(error.localizedDescription == "operator \"\(name)(\(types))\" not supported")
+            }
+        }
+    }
+
+    @Test(arguments: [
+        ("SELECT bad + 1", "operator \"add(str, int)\" not supported"),
+        ("SELECT 1 IN bad", "operator \"inList(int, str)\" not supported"),
+        ("SELECT -bad", "neg: expected int | decimal | amount | position | inventory, got str"),
+        ("SELECT bad.foo", "attribute .foo: expected dict | structure | amount | position | date | directive, got str"),
+        ("SELECT bad['key']", "subscript: expected dict, got str"),
+        ("SELECT bad WHERE bad", "boolean expression: expected bool, got str"),
+        ("SELECT sum(bad)", "sum(): expected amount | position | inventory, got str"),
+        ("SELECT 1 = ANY(bad)", "ANY: expected list, got str"),
+    ])
+    func runtimeTypeErrorsDescribeOperation(_ query: String, _ expected: String) throws {
+        let context = QueryContext(tables: ["postings": [["bad": .string("private ledger value")]]])
+        do {
+            _ = try engine.run(query, in: context)
+            Issue.record("expected runtime type error")
+        } catch {
+            #expect(error.localizedDescription == expected)
+        }
+    }
+
     private final class RowCounter: @unchecked Sendable {
         var yielded = 0
     }
@@ -383,7 +448,9 @@ struct BQLExecutionTests {
     }
 
     @Test func runSubscriptOnNonDictionaryValueFails() throws {
-        #expect(throws: BQLExecutionError.invalidType) {
+        #expect(throws: BQLExecutionError.invalidType(
+            operation: "subscript", expected: "dict", actual: "date"
+        )) {
             try engine.run("SELECT date['lineno'] FROM #postings", in: subscriptContext)
         }
     }

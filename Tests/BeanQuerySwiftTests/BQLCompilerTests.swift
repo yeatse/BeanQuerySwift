@@ -386,6 +386,34 @@ struct BQLCompilerTests {
         }
     }
 
+    @Test(arguments: ["=", "!=", "<", "<=", ">", ">="])
+    func compileComparisonWithNullFails(_ op: String) throws {
+        // Cover both operand orders, dynamic columns, and constant folding.
+        for expression in ["payee \(op) NULL", "NULL \(op) payee", "'Alice' \(op) NULL", "NULL \(op) NULL"] {
+            #expect(throws: BQLCompileError.self) {
+                try engine.compile("SELECT \(expression) FROM #postings")
+            }
+        }
+    }
+
+    @Test func compilePayeeCountWithNullComparisonFails() throws {
+        let query = """
+        SELECT payee, count(*) AS transaction_count
+        FROM (SELECT DISTINCT id, payee
+              WHERE account ~ '^Expenses(:|$)' AND payee != NULL AND payee != '')
+        GROUP BY payee ORDER BY transaction_count, payee LIMIT 5
+        """
+        do {
+            _ = try engine.compile(query)
+            Issue.record("expected NULL comparison to fail during compilation")
+        } catch let error as BQLCompileError {
+            #expect(error == .invalidBinaryOperator(op: .notEqual, left: .object, right: .null))
+        }
+
+        // The supported NULL predicate must still compile in the same query.
+        _ = try engine.compile(query.replacingOccurrences(of: "payee != NULL", with: "payee IS NOT NULL"))
+    }
+
     @Test func compileConstantExpressionFolding() throws {
         let compiled = try engine.compile("SELECT 1 + 2 AS total FROM #")
         guard case .constant(.integer(let value)) = compiled.targets[0].expression else {

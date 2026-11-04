@@ -57,6 +57,14 @@ struct BuiltinFunctionEvaluator {
             return .null
         }
 
+        func invalidArguments(expected: String) -> BQLExecutionError {
+            .invalidType(
+                operation: "\(name)()",
+                expected: expected,
+                actual: "(\(values.map(\.diagnosticTypeName).joined(separator: ", ")))"
+            )
+        }
+
         switch normalizedName {
         case "getitem":
             guard values.count == 2 || values.count == 3 else {
@@ -68,7 +76,7 @@ struct BuiltinFunctionEvaluator {
             guard case .dict(let dictionary) = values[0],
                   case .string(let key) = values[1]
             else {
-                throw BQLExecutionError.invalidType
+                throw invalidArguments(expected: "(dict, str[, object])")
             }
             if values.count == 3 {
                 return dictionary[key] ?? values[2]
@@ -97,7 +105,7 @@ struct BuiltinFunctionEvaluator {
             let digits: Int
             if values.count == 2 {
                 guard let parsedDigits = asInt(values[1]) else {
-                    throw BQLExecutionError.invalidType
+                    throw invalidArguments(expected: "(int | decimal[, int])")
                 }
                 digits = parsedDigits
             } else {
@@ -115,7 +123,7 @@ struct BuiltinFunctionEvaluator {
             guard let numerator = asDecimal(values[0]),
                   let denominator = asDecimal(values[1])
             else {
-                throw BQLExecutionError.invalidType
+                throw invalidArguments(expected: "(int | decimal, int | decimal)")
             }
             if denominator == .zero {
                 return .decimal(.zero)
@@ -157,7 +165,7 @@ struct BuiltinFunctionEvaluator {
                 if values[0] == .null {
                     return .null
                 }
-                throw BQLExecutionError.invalidType
+                throw invalidArguments(expected: "(str, int)")
             }
             return .string(String(text.prefix(max(width, 0))))
 
@@ -176,7 +184,7 @@ struct BuiltinFunctionEvaluator {
             case .dict(let dictionary):
                 return .int(dictionary.count)
             default:
-                throw BQLExecutionError.invalidType
+                throw invalidArguments(expected: "(str | list | dict)")
             }
 
         case "repr":
@@ -196,7 +204,7 @@ struct BuiltinFunctionEvaluator {
                   let start = asInt(values[1]),
                   let end = asInt(values[2])
             else {
-                throw BQLExecutionError.invalidType
+                throw invalidArguments(expected: "(str, int, int)")
             }
             return .string(substr(string, start: start, end: end))
 
@@ -211,7 +219,7 @@ struct BuiltinFunctionEvaluator {
                   case .string(let delimiter) = values[1],
                   let index = asInt(values[2])
             else {
-                throw BQLExecutionError.invalidType
+                throw invalidArguments(expected: "(str, str, int)")
             }
             return splitComponent(string, delimiter: delimiter, index: index).map(RuntimeValue.string) ?? .null
 
@@ -240,7 +248,7 @@ struct BuiltinFunctionEvaluator {
                   let month = asInt(values[1]),
                   let day = asInt(values[2])
             else {
-                throw BQLExecutionError.invalidType
+                throw invalidArguments(expected: "(int, int, int)")
             }
             return buildDate(year: year, month: month, day: day).map(RuntimeValue.date) ?? .null
 
@@ -252,7 +260,7 @@ struct BuiltinFunctionEvaluator {
                 return .null
             }
             guard case .date(let date) = values[0] else {
-                throw BQLExecutionError.invalidType
+                throw invalidArguments(expected: "(date)")
             }
             return .int(dateParts(date).year)
 
@@ -264,7 +272,7 @@ struct BuiltinFunctionEvaluator {
                 return .null
             }
             guard case .date(let date) = values[0] else {
-                throw BQLExecutionError.invalidType
+                throw invalidArguments(expected: "(date)")
             }
             return .int(dateParts(date).month)
 
@@ -276,7 +284,7 @@ struct BuiltinFunctionEvaluator {
                 return .null
             }
             guard case .date(let date) = values[0] else {
-                throw BQLExecutionError.invalidType
+                throw invalidArguments(expected: "(date)")
             }
             return .int(dateParts(date).day)
 
@@ -288,7 +296,7 @@ struct BuiltinFunctionEvaluator {
                 return .null
             }
             guard case .date(let date) = values[0] else {
-                throw BQLExecutionError.invalidType
+                throw invalidArguments(expected: "(date)")
             }
             let parts = dateParts(date)
             return buildDate(year: parts.year, month: parts.month, day: 1).map(RuntimeValue.date) ?? .null
@@ -301,7 +309,7 @@ struct BuiltinFunctionEvaluator {
                 return .null
             }
             guard case .date(let date) = values[0] else {
-                throw BQLExecutionError.invalidType
+                throw invalidArguments(expected: "(date)")
             }
             let parts = dateParts(date)
             let quarter = (parts.month - 1) / 3 + 1
@@ -315,7 +323,7 @@ struct BuiltinFunctionEvaluator {
                 return .null
             }
             guard case .date(let date) = values[0] else {
-                throw BQLExecutionError.invalidType
+                throw invalidArguments(expected: "(date)")
             }
             return .string(weekdayAbbreviation(for: date))
 
@@ -333,11 +341,11 @@ struct BuiltinFunctionEvaluator {
                 return .null
             }
             guard case .string(let input) = values[0] else {
-                throw BQLExecutionError.invalidType
+                throw invalidArguments(expected: "(str[, str])")
             }
             if values.count == 2 {
                 guard case .string(let format) = values[1] else {
-                    throw BQLExecutionError.invalidType
+                    throw invalidArguments(expected: "(str[, str])")
                 }
                 return parseDate(input, withPythonFormat: format).map(RuntimeValue.date) ?? .null
             }
@@ -351,7 +359,7 @@ struct BuiltinFunctionEvaluator {
                 return .null
             }
             guard case .date(let x) = values[0], case .date(let y) = values[1] else {
-                throw BQLExecutionError.invalidType
+                throw invalidArguments(expected: "(date, date)")
             }
             guard let diff = daysBetween(y, x) else {
                 return .null
@@ -368,7 +376,7 @@ struct BuiltinFunctionEvaluator {
             guard case .date(let date) = values[0],
                   let offset = asInt(values[1])
             else {
-                throw BQLExecutionError.invalidType
+                throw invalidArguments(expected: "(date, int)")
             }
             return addDays(date, offset).map(RuntimeValue.date) ?? .null
 
@@ -380,7 +388,7 @@ struct BuiltinFunctionEvaluator {
                 return .null
             }
             guard case .string(let field) = values[0], case .date(let date) = values[1] else {
-                throw BQLExecutionError.invalidType
+                throw invalidArguments(expected: "(str, date)")
             }
             return dateTrunc(field: field, date: date).map(RuntimeValue.date) ?? .null
 
@@ -392,7 +400,7 @@ struct BuiltinFunctionEvaluator {
                 return .null
             }
             guard case .string(let field) = values[0], case .date(let date) = values[1] else {
-                throw BQLExecutionError.invalidType
+                throw invalidArguments(expected: "(str, date)")
             }
             return datePart(field: field, date: date).map(RuntimeValue.int) ?? .null
 
@@ -404,7 +412,7 @@ struct BuiltinFunctionEvaluator {
                 return .null
             }
             guard case .string(let stride) = values[0] else {
-                throw BQLExecutionError.invalidType
+                throw invalidArguments(expected: "(str)")
             }
             return parseInterval(stride)?.runtimeValue ?? .null
 
@@ -421,13 +429,13 @@ struct BuiltinFunctionEvaluator {
             } else if case .string(let strideString) = values[0] {
                 stride = parseInterval(strideString)
             } else {
-                throw BQLExecutionError.invalidType
+                throw invalidArguments(expected: "(str | list[int] of length 3, date, date)")
             }
             guard let stride else {
                 return .null
             }
             guard case .date(let source) = values[1], case .date(let origin) = values[2] else {
-                throw BQLExecutionError.invalidType
+                throw invalidArguments(expected: "(str | list[int] of length 3, date, date)")
             }
             return dateBin(stride: stride, source: source, origin: origin).map(RuntimeValue.date) ?? .null
 
@@ -440,7 +448,7 @@ struct BuiltinFunctionEvaluator {
                 return .null
             }
             guard case .string(let account) = values[0] else {
-                throw BQLExecutionError.invalidType
+                throw invalidArguments(expected: "(str[, int])")
             }
 
             let componentCount: Int
@@ -449,7 +457,7 @@ struct BuiltinFunctionEvaluator {
                     return .null
                 }
                 guard let count = asInt(values[1]) else {
-                    throw BQLExecutionError.invalidType
+                    throw invalidArguments(expected: "(str[, int])")
                 }
                 componentCount = count
             } else {
@@ -465,7 +473,7 @@ struct BuiltinFunctionEvaluator {
                 return .null
             }
             guard case .string(let account) = values[0] else {
-                throw BQLExecutionError.invalidType
+                throw invalidArguments(expected: "(str)")
             }
             return parentAccount(account).map(RuntimeValue.string) ?? .null
 
@@ -477,7 +485,7 @@ struct BuiltinFunctionEvaluator {
                 return .null
             }
             guard case .string(let account) = values[0] else {
-                throw BQLExecutionError.invalidType
+                throw invalidArguments(expected: "(str)")
             }
             return leafAccount(account).map(RuntimeValue.string) ?? .null
 
@@ -491,7 +499,7 @@ struct BuiltinFunctionEvaluator {
             guard case .string(let pattern) = values[0],
                   case .string(let string) = values[1]
             else {
-                throw BQLExecutionError.invalidType
+                throw invalidArguments(expected: "(str, str)")
             }
             return firstRegexMatch(pattern: pattern, in: string).map(RuntimeValue.string) ?? .null
 
@@ -506,7 +514,7 @@ struct BuiltinFunctionEvaluator {
                   case .string(let string) = values[1],
                   let groupIndex = asInt(values[2])
             else {
-                throw BQLExecutionError.invalidType
+                throw invalidArguments(expected: "(str, str, int)")
             }
             return regexGroup(pattern: pattern, in: string, index: groupIndex).map(RuntimeValue.string) ?? .null
 
@@ -521,7 +529,7 @@ struct BuiltinFunctionEvaluator {
                   case .string(let replacement) = values[1],
                   case .string(let string) = values[2]
             else {
-                throw BQLExecutionError.invalidType
+                throw invalidArguments(expected: "(str, str, str)")
             }
             return substituteRegex(pattern: pattern, replacement: replacement, in: string).map(RuntimeValue.string) ?? .null
 
@@ -533,7 +541,7 @@ struct BuiltinFunctionEvaluator {
                 return .null
             }
             guard case .string(let string) = values[0] else {
-                throw BQLExecutionError.invalidType
+                throw invalidArguments(expected: "(str)")
             }
             return .string(string.uppercased())
 
@@ -545,7 +553,7 @@ struct BuiltinFunctionEvaluator {
                 return .null
             }
             guard case .string(let string) = values[0] else {
-                throw BQLExecutionError.invalidType
+                throw invalidArguments(expected: "(str)")
             }
             return .string(string.lowercased())
 
@@ -557,7 +565,7 @@ struct BuiltinFunctionEvaluator {
                 return .null
             }
             guard case .string(let account) = values[0] else {
-                throw BQLExecutionError.invalidType
+                throw invalidArguments(expected: "(str)")
             }
             return structureField(lookupAccount(account)?["open"], "date") ?? .null
 
@@ -569,7 +577,7 @@ struct BuiltinFunctionEvaluator {
                 return .null
             }
             guard case .string(let account) = values[0] else {
-                throw BQLExecutionError.invalidType
+                throw invalidArguments(expected: "(str)")
             }
             return structureField(lookupAccount(account)?["close"], "date") ?? .null
 
@@ -581,7 +589,7 @@ struct BuiltinFunctionEvaluator {
                 return .null
             }
             guard case .string(let account) = values[0] else {
-                throw BQLExecutionError.invalidType
+                throw invalidArguments(expected: "(str[, str])")
             }
 
             guard let accountRow = lookupAccount(account),
@@ -597,7 +605,7 @@ struct BuiltinFunctionEvaluator {
                 return .null
             }
             guard case .string(let key) = values[1] else {
-                throw BQLExecutionError.invalidType
+                throw invalidArguments(expected: "(str[, str])")
             }
             return metadata[key] ?? .null
 
@@ -609,7 +617,7 @@ struct BuiltinFunctionEvaluator {
                 return .null
             }
             guard case .string(let commodity) = values[0] else {
-                throw BQLExecutionError.invalidType
+                throw invalidArguments(expected: "(str[, str])")
             }
 
             guard let commodityRow = lookupCommodity(commodity),
@@ -625,7 +633,7 @@ struct BuiltinFunctionEvaluator {
                 return .null
             }
             guard case .string(let key) = values[1] else {
-                throw BQLExecutionError.invalidType
+                throw invalidArguments(expected: "(str[, str])")
             }
             return metadata[key] ?? .null
 
@@ -637,7 +645,7 @@ struct BuiltinFunctionEvaluator {
                 return .null
             }
             guard case .string(let key) = values[0] else {
-                throw BQLExecutionError.invalidType
+                throw invalidArguments(expected: "(str)")
             }
             return metadataValue(row: row, column: "meta", key: key)
 
@@ -649,7 +657,7 @@ struct BuiltinFunctionEvaluator {
                 return .null
             }
             guard case .string(let key) = values[0] else {
-                throw BQLExecutionError.invalidType
+                throw invalidArguments(expected: "(str)")
             }
             return metadataValue(row: row, column: "entry_meta", key: key)
 
@@ -661,7 +669,7 @@ struct BuiltinFunctionEvaluator {
                 return .null
             }
             guard case .string(let key) = values[0] else {
-                throw BQLExecutionError.invalidType
+                throw invalidArguments(expected: "(str)")
             }
 
             let postingValue = metadataValue(row: row, column: "meta", key: key)
@@ -678,7 +686,7 @@ struct BuiltinFunctionEvaluator {
                 return .null
             }
             guard case .string(let account) = values[0] else {
-                throw BQLExecutionError.invalidType
+                throw invalidArguments(expected: "(str)")
             }
             let index = accountSortIndex(account)
             return .string("\(index)-\(account)")
@@ -691,7 +699,7 @@ struct BuiltinFunctionEvaluator {
                 return .null
             }
             guard case .string(let pattern) = values[0] else {
-                throw BQLExecutionError.invalidType
+                throw invalidArguments(expected: "(str)")
             }
             return .bool(rowHasAccount(row: row, pattern: pattern))
 
@@ -719,13 +727,13 @@ struct BuiltinFunctionEvaluator {
                 throw BQLExecutionError.unsupportedFunction(name)
             }
             guard case .string(let targetCurrency) = values[1] else {
-                throw BQLExecutionError.invalidType
+                throw invalidArguments(expected: "(amount | position | inventory, str[, date])")
             }
 
             let date: Date?
             if values.count == 3 {
                 guard case .date(let suppliedDate) = values[2] else {
-                    throw BQLExecutionError.invalidType
+                    throw invalidArguments(expected: "(amount | position | inventory, str[, date])")
                 }
                 date = suppliedDate
             } else {
@@ -740,7 +748,7 @@ struct BuiltinFunctionEvaluator {
             let date: Date?
             if values.count == 2 {
                 guard case .date(let suppliedDate) = values[1] else {
-                    throw BQLExecutionError.invalidType
+                    throw invalidArguments(expected: "(int | decimal | amount | position | inventory[, date])")
                 }
                 date = suppliedDate
             } else {
@@ -755,13 +763,13 @@ struct BuiltinFunctionEvaluator {
             guard case .string(let baseCurrency) = values[0],
                   case .string(let quoteCurrency) = values[1]
             else {
-                throw BQLExecutionError.invalidType
+                throw invalidArguments(expected: "(str, str[, date])")
             }
 
             let date: Date?
             if values.count == 3 {
                 guard case .date(let suppliedDate) = values[2] else {
-                    throw BQLExecutionError.invalidType
+                    throw invalidArguments(expected: "(str, str[, date])")
                 }
                 date = suppliedDate
             } else {
@@ -791,7 +799,7 @@ struct BuiltinFunctionEvaluator {
             guard case .string(let pattern) = values[0],
                   let stringValues = asStringList(values[1])
             else {
-                throw BQLExecutionError.invalidType
+                throw invalidArguments(expected: "(str, list[str])")
             }
             return findFirst(pattern: pattern, in: stringValues).map(RuntimeValue.string) ?? .null
 
@@ -803,7 +811,7 @@ struct BuiltinFunctionEvaluator {
                 return .null
             }
             guard let stringValues = asStringList(values[0]) else {
-                throw BQLExecutionError.invalidType
+                throw invalidArguments(expected: "(list[str])")
             }
             return .string(stringValues.joined(separator: ","))
 
@@ -812,7 +820,7 @@ struct BuiltinFunctionEvaluator {
                 throw BQLExecutionError.unsupportedFunction(name)
             }
             guard case .string(let currency) = values[0] else {
-                throw BQLExecutionError.invalidType
+                throw invalidArguments(expected: "(str, inventory)")
             }
             return try only(currency: currency, inventory: values[1])
 
@@ -827,7 +835,7 @@ struct BuiltinFunctionEvaluator {
                 throw BQLExecutionError.unsupportedFunction(name)
             }
             guard case .string(let currency) = values[1] else {
-                throw BQLExecutionError.invalidType
+                throw invalidArguments(expected: "(position | inventory, str)")
             }
             return try filterCurrency(values[0], currency: currency)
 
@@ -836,7 +844,7 @@ struct BuiltinFunctionEvaluator {
                 throw BQLExecutionError.unsupportedFunction(name)
             }
             guard case .string(let account) = values[1] else {
-                throw BQLExecutionError.invalidType
+                throw invalidArguments(expected: "(int | decimal | amount | position | inventory, str)")
             }
             return try possign(values[0], account: account)
 
@@ -860,7 +868,9 @@ struct BuiltinFunctionEvaluator {
         case .null:
             return .null
         default:
-            throw BQLExecutionError.invalidType
+            throw BQLExecutionError.invalidType(
+                operation: "abs()", expected: "int | decimal | amount | position | inventory", actual: value.diagnosticTypeName
+            )
         }
     }
 
@@ -873,7 +883,9 @@ struct BuiltinFunctionEvaluator {
         case .null:
             return .null
         default:
-            throw BQLExecutionError.invalidType
+            throw BQLExecutionError.invalidType(
+                operation: "round()", expected: "int | decimal", actual: value.diagnosticTypeName
+            )
         }
     }
 
@@ -1093,7 +1105,9 @@ struct BuiltinFunctionEvaluator {
         case .null:
             return .null
         default:
-            throw BQLExecutionError.invalidType
+            throw BQLExecutionError.invalidType(
+                operation: "units()", expected: "int | decimal | amount | position | inventory", actual: value.diagnosticTypeName
+            )
         }
     }
 
@@ -1108,7 +1122,9 @@ struct BuiltinFunctionEvaluator {
         case .null:
             return .null
         default:
-            throw BQLExecutionError.invalidType
+            throw BQLExecutionError.invalidType(
+                operation: "cost()", expected: "int | decimal | amount | position | inventory", actual: value.diagnosticTypeName
+            )
         }
     }
 
@@ -1123,7 +1139,9 @@ struct BuiltinFunctionEvaluator {
         case .null:
             return .null
         default:
-            throw BQLExecutionError.invalidType
+            throw BQLExecutionError.invalidType(
+                operation: "weight()", expected: "int | decimal | amount | position | inventory", actual: value.diagnosticTypeName
+            )
         }
     }
 
@@ -1148,7 +1166,9 @@ struct BuiltinFunctionEvaluator {
             return .null
 
         default:
-            throw BQLExecutionError.invalidType
+            throw BQLExecutionError.invalidType(
+                operation: "value()", expected: "int | decimal | amount | position | inventory", actual: input.diagnosticTypeName
+            )
         }
     }
 
@@ -1186,7 +1206,9 @@ struct BuiltinFunctionEvaluator {
             return .null
 
         default:
-            throw BQLExecutionError.invalidType
+            throw BQLExecutionError.invalidType(
+                operation: "convert()", expected: "amount | position | inventory", actual: input.diagnosticTypeName
+            )
         }
     }
 
@@ -1215,7 +1237,9 @@ struct BuiltinFunctionEvaluator {
         case .null:
             return .null
         default:
-            throw BQLExecutionError.invalidType
+            throw BQLExecutionError.invalidType(
+                operation: "number()", expected: "amount", actual: value.diagnosticTypeName
+            )
         }
     }
 
@@ -1226,7 +1250,9 @@ struct BuiltinFunctionEvaluator {
         case .null:
             return .null
         default:
-            throw BQLExecutionError.invalidType
+            throw BQLExecutionError.invalidType(
+                operation: "currency()", expected: "amount", actual: value.diagnosticTypeName
+            )
         }
     }
 
@@ -1237,7 +1263,9 @@ struct BuiltinFunctionEvaluator {
         case .null:
             return .null
         default:
-            throw BQLExecutionError.invalidType
+            throw BQLExecutionError.invalidType(
+                operation: "only()", expected: "inventory", actual: inventory.diagnosticTypeName
+            )
         }
     }
 
@@ -1248,7 +1276,9 @@ struct BuiltinFunctionEvaluator {
         case .null:
             return .null
         default:
-            throw BQLExecutionError.invalidType
+            throw BQLExecutionError.invalidType(
+                operation: "empty()", expected: "inventory", actual: value.diagnosticTypeName
+            )
         }
     }
 
@@ -1262,7 +1292,9 @@ struct BuiltinFunctionEvaluator {
         case .null:
             return .null
         default:
-            throw BQLExecutionError.invalidType
+            throw BQLExecutionError.invalidType(
+                operation: "filter_currency()", expected: "position | inventory", actual: value.diagnosticTypeName
+            )
         }
     }
 

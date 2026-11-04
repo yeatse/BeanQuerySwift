@@ -574,7 +574,7 @@ struct QueryExecutor {
                 return .null
             }
             guard case .list(let values) = right else {
-                throw BQLExecutionError.invalidType
+                throw BQLExecutionError.invalidType(operation: quantifier == .any ? "ANY" : "ALL", expected: "list", actual: right.diagnosticTypeName)
             }
 
             let results = try values.map { value in
@@ -683,7 +683,9 @@ struct QueryExecutor {
             if case .string(let l) = left, case .string(let r) = right {
                 return .string(l + r)
             }
-            throw BQLExecutionError.invalidType
+            throw BQLExecutionError.invalidBinaryOperator(
+                    op: op, leftType: left.diagnosticTypeName, rightType: right.diagnosticTypeName
+                )
 
         case .sub:
             if let l = asInt(left), let r = asInt(right) {
@@ -708,7 +710,9 @@ struct QueryExecutor {
             if let l = asDecimal(left), let r = asDecimal(right) {
                 return .decimal(l - r)
             }
-            throw BQLExecutionError.invalidType
+            throw BQLExecutionError.invalidBinaryOperator(
+                    op: op, leftType: left.diagnosticTypeName, rightType: right.diagnosticTypeName
+                )
 
         case .mul:
             if let l = asInt(left), let r = asInt(right) {
@@ -717,7 +721,9 @@ struct QueryExecutor {
             if let l = asDecimal(left), let r = asDecimal(right) {
                 return .decimal(l * r)
             }
-            throw BQLExecutionError.invalidType
+            throw BQLExecutionError.invalidBinaryOperator(
+                    op: op, leftType: left.diagnosticTypeName, rightType: right.diagnosticTypeName
+                )
 
         case .div:
             if let l = asDecimal(left), let r = asDecimal(right) {
@@ -726,13 +732,17 @@ struct QueryExecutor {
             if let l = asInt(left), let r = asInt(right) {
                 return r == 0 ? .null : .decimal(Decimal(l) / Decimal(r))
             }
-            throw BQLExecutionError.invalidType
+            throw BQLExecutionError.invalidBinaryOperator(
+                    op: op, leftType: left.diagnosticTypeName, rightType: right.diagnosticTypeName
+                )
 
         case .mod:
             if let l = asInt(left), let r = asInt(right) {
                 return r == 0 ? .null : .int(l % r)
             }
-            throw BQLExecutionError.invalidType
+            throw BQLExecutionError.invalidBinaryOperator(
+                    op: op, leftType: left.diagnosticTypeName, rightType: right.diagnosticTypeName
+                )
 
         case .equal:
             return .bool(numericEquals(left, right))
@@ -756,31 +766,41 @@ struct QueryExecutor {
 
         case .inList:
             guard case .list(let values) = right else {
-                throw BQLExecutionError.invalidType
+                throw BQLExecutionError.invalidBinaryOperator(
+                    op: op, leftType: left.diagnosticTypeName, rightType: right.diagnosticTypeName
+                )
             }
             return .bool(values.contains(left))
 
         case .notInList:
             guard case .list(let values) = right else {
-                throw BQLExecutionError.invalidType
+                throw BQLExecutionError.invalidBinaryOperator(
+                    op: op, leftType: left.diagnosticTypeName, rightType: right.diagnosticTypeName
+                )
             }
             return .bool(!values.contains(left))
 
         case .match:
             guard case .string(let input) = left, case .string(let pattern) = right else {
-                throw BQLExecutionError.invalidType
+                throw BQLExecutionError.invalidBinaryOperator(
+                    op: op, leftType: left.diagnosticTypeName, rightType: right.diagnosticTypeName
+                )
             }
             return .bool(matches(pattern: pattern, in: input, caseInsensitive: true))
 
         case .notMatch:
             guard case .string(let input) = left, case .string(let pattern) = right else {
-                throw BQLExecutionError.invalidType
+                throw BQLExecutionError.invalidBinaryOperator(
+                    op: op, leftType: left.diagnosticTypeName, rightType: right.diagnosticTypeName
+                )
             }
             return .bool(!matches(pattern: pattern, in: input, caseInsensitive: true))
 
         case .matches:
             guard case .string(let pattern) = left, case .string(let input) = right else {
-                throw BQLExecutionError.invalidType
+                throw BQLExecutionError.invalidBinaryOperator(
+                    op: op, leftType: left.diagnosticTypeName, rightType: right.diagnosticTypeName
+                )
             }
             return .bool(matches(pattern: pattern, in: input, caseInsensitive: false))
         }
@@ -795,7 +815,7 @@ struct QueryExecutor {
         if nonNull.contains(where: { if case .decimal = $0 { return true } else { return false } }) {
             let total = try nonNull.reduce(Decimal.zero) { partial, value in
                 guard let decimal = asDecimal(value) else {
-                    throw BQLExecutionError.invalidType
+                    throw BQLExecutionError.invalidType(operation: "sum()", expected: "int | decimal", actual: value.diagnosticTypeName)
                 }
                 return partial + decimal
             }
@@ -823,7 +843,7 @@ struct QueryExecutor {
             case .inventory(let partial):
                 inventory = inventory + partial
             default:
-                throw BQLExecutionError.invalidType
+                throw BQLExecutionError.invalidType(operation: "sum()", expected: "amount | position | inventory", actual: value.diagnosticTypeName)
             }
         }
         return .inventory(inventory)
@@ -852,7 +872,7 @@ struct QueryExecutor {
         switch value {
         case .bool(let bool): return bool
         case .null: return false
-        default: throw BQLExecutionError.invalidType
+        default: throw BQLExecutionError.invalidType(operation: "boolean expression", expected: "bool", actual: value.diagnosticTypeName)
         }
     }
 
@@ -1089,7 +1109,7 @@ private func resolveAttribute(_ value: RuntimeValue, name: String) throws -> Run
     case .directive(let directive):
         return directiveAttribute(directive, name: name)
     default:
-        throw BQLExecutionError.invalidType
+        throw BQLExecutionError.invalidType(operation: "attribute .\(name)", expected: "dict | structure | amount | position | date | directive", actual: value.diagnosticTypeName)
     }
 }
 
@@ -1103,7 +1123,7 @@ private func resolveSubscript(_ value: RuntimeValue, key: String) throws -> Runt
     case .dict(let map):
         return map[key] ?? .null
     default:
-        throw BQLExecutionError.invalidType
+        throw BQLExecutionError.invalidType(operation: "subscript", expected: "dict", actual: value.diagnosticTypeName)
     }
 }
 
